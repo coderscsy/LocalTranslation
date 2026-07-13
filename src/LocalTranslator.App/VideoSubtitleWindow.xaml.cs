@@ -124,6 +124,7 @@ public partial class VideoSubtitleWindow : Window
             SenseVoiceUrlBox is null ||
             SenseVoiceModelBox is null ||
             TestAsrButton is null ||
+            AsrStatusText is null ||
             StartButton is null ||
             DefaultModelStatusText is null ||
             StatusText is null)
@@ -161,9 +162,15 @@ public partial class VideoSubtitleWindow : Window
         DefaultModelStatusText.Text = engine == SpeechRecognitionEngine.SenseVoiceSmall
             ? "推荐默认"
             : _speechModelManager.IsDefaultModelInstalled ? "已安装 · 当前默认" : "未安装";
-        StatusText.Text = engine == SpeechRecognitionEngine.SenseVoiceSmall
-            ? "当前 ASR：SenseVoice Small。请确认本地 FunASR/OpenAI-compatible ASR 服务已启动。"
-            : "当前 ASR：Whisper GGML。可使用内置默认模型或自己的 GGML 模型。";
+        SetAsrStatus(engine == SpeechRecognitionEngine.SenseVoiceSmall
+            ? "\u5f53\u524d ASR\uff1aSenseVoice Small\u3002\u8bf7\u786e\u8ba4\u672c\u5730 FunASR/OpenAI-compatible ASR \u670d\u52a1\u5df2\u542f\u52a8\u3002"
+            : "\u5f53\u524d ASR\uff1aWhisper GGML\u3002\u53ef\u4f7f\u7528\u5185\u7f6e\u9ed8\u8ba4\u6a21\u578b\u6216\u81ea\u5df1\u7684 GGML \u6a21\u578b\u3002");
+    }
+
+    private void SetAsrStatus(string message)
+    {
+        if (AsrStatusText is not null) AsrStatusText.Text = message;
+        if (StatusText is not null) StatusText.Text = message;
     }
 
     private bool IsAsrEngineEnabled(SpeechRecognitionEngine engine) => engine switch
@@ -176,21 +183,24 @@ public partial class VideoSubtitleWindow : Window
     private async void TestAsrService_Click(object sender, RoutedEventArgs e)
     {
         TestAsrButton.IsEnabled = false;
-        StatusText.Text = "正在测试 ASR 服务…";
+        SetAsrStatus("\u6b63\u5728\u6d4b\u8bd5 ASR \u670d\u52a1\u2026");
         try
         {
             var result = await VideoSubtitleService.TestSenseVoiceEndpointAsync(
                 SenseVoiceUrlBox.Text.Trim(),
                 SenseVoiceModelBox.Text.Trim());
-            StatusText.Text = $"ASR 测试成功：{result}";
+            SetAsrStatus($"ASR \u6d4b\u8bd5\u6210\u529f\uff1a{result}");
         }
         catch (Exception exception)
         {
-            StatusText.Text = $"ASR 测试失败：{exception.Message}";
+            SetAsrStatus($"ASR \u6d4b\u8bd5\u5931\u8d25\uff1a{exception.Message}");
         }
         finally
         {
-            RefreshAsrEngineUi();
+            TestAsrButton.IsEnabled =
+                AsrEngineCombo.SelectedItem is AsrEngineChoice { Engine: SpeechRecognitionEngine.SenseVoiceSmall } &&
+                EnableSenseVoiceCheck.IsChecked == true &&
+                !_running;
         }
     }
 

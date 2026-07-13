@@ -91,6 +91,55 @@
         <!-- 未显式指定用途的按钮统一使用次级圆角样式，避免回退到 Windows 原生按钮。 -->
         <Style TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}" />
 
+        <Style x:Key="VsLikeScrollBarStyle" TargetType="{x:Type ScrollBar}">
+            <Setter Property="Width" Value="11" />
+            <Setter Property="MinWidth" Value="11" />
+            <Setter Property="Background" Value="#F3F3F3" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ScrollBar}">
+                        <Grid Width="{TemplateBinding Width}"
+                              Background="{TemplateBinding Background}"
+                              SnapsToDevicePixels="True">
+                            <Border Width="1"
+                                    HorizontalAlignment="Center"
+                                    Background="#D7D7D7" />
+                            <Track x:Name="PART_Track"
+                                   IsDirectionReversed="True">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageUpCommand"
+                                                  Focusable="False"
+                                                  Opacity="0" />
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Background="#8C8C8C">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="{x:Type Thumb}">
+                                                <Border Width="8"
+                                                        HorizontalAlignment="Center"
+                                                        Background="{TemplateBinding Background}"
+                                                        CornerRadius="4" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageDownCommand"
+                                                  Focusable="False"
+                                                  Opacity="0" />
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#EFEFEF" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="IconButtonStyle"
                BasedOn="{StaticResource BaseButtonStyle}"
                TargetType="Button">

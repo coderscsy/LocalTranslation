@@ -11,7 +11,11 @@
                        Text="采集当前输出设备的系统声音，Whisper 本地识别人物对话，再由当前翻译 Provider 生成字幕。"/>
         </StackPanel>
         <ScrollViewer Grid.Row="1" Margin="0,18,0,14"
+                      Focusable="False"
                       HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <ScrollViewer.Resources>
+                <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource VsLikeScrollBarStyle}" />
+            </ScrollViewer.Resources>
         <StackPanel Margin="0,0,8,0">
         <Border Padding="18" Style="{StaticResource CardStyle}">
             <Grid>
@@ -30,6 +34,7 @@
                     </Grid>
                     <Grid Margin="0,12,0,0">
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
@@ -65,6 +70,16 @@
                                      Text="fun-asr-nano"
                                      ToolTip="填写 FunASR/OpenAI-compatible ASR 暴露的模型名，例如 fun-asr-nano、SenseVoiceSmall 或你的自定义模型名。"/>
                         </StackPanel>
+                        <Border Grid.Row="2" Grid.ColumnSpan="3" Margin="0,12,0,0"
+                                Padding="12,9" Background="#F8F9FC"
+                                BorderBrush="{StaticResource BorderBrush}"
+                                BorderThickness="1" CornerRadius="9">
+                            <TextBlock x:Name="AsrStatusText"
+                                       FontSize="11"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Text="ASR 状态会在这里显示，测试结果无需滚动到底部查看。"/>
+                        </Border>
                     </Grid>
 
                     <Border Margin="0,12,0,0" Padding="14,12" Background="#F8F9FC" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10">
