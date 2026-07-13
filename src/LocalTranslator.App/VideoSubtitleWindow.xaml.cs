@@ -6,7 +6,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using LocalTranslator.Core.Abstractions;
 using LocalTranslator.Core.Models;
 using LocalTranslator.Infrastructure.Configuration;
@@ -166,6 +168,12 @@ public partial class VideoSubtitleWindow : Window
             AsrDependencyProgressText is null ||
             StartButton is null ||
             DefaultModelStatusText is null ||
+            ParakeetEngineCard is null ||
+            SenseVoiceEngineCard is null ||
+            WhisperEngineCard is null ||
+            ParakeetCurrentBadge is null ||
+            SenseVoiceCurrentBadge is null ||
+            WhisperCurrentBadge is null ||
             StatusText is null)
         {
             return;
@@ -195,6 +203,9 @@ public partial class VideoSubtitleWindow : Window
         var useParakeet = engine == SpeechRecognitionEngine.MeetilyParakeet;
         var useSenseVoice = engine == SpeechRecognitionEngine.SenseVoiceSmall;
         var useWhisper = engine == SpeechRecognitionEngine.WhisperGgml;
+        UpdateAsrEngineCard(ParakeetEngineCard, ParakeetCurrentBadge, useParakeet);
+        UpdateAsrEngineCard(SenseVoiceEngineCard, SenseVoiceCurrentBadge, useSenseVoice);
+        UpdateAsrEngineCard(WhisperEngineCard, WhisperCurrentBadge, useWhisper);
         WhisperModelTitle.Opacity = useWhisper ? 1 : 0.45;
         WhisperModelTitle.Visibility = useWhisper ? Visibility.Visible : Visibility.Collapsed;
         WhisperModelGrid.Visibility = useWhisper ? Visibility.Visible : Visibility.Collapsed;
@@ -226,6 +237,16 @@ public partial class VideoSubtitleWindow : Window
                 "当前 ASR：SenseVoice Small。适合中文、日语和中英混说；开始翻译时自动启动本地服务。",
             _ => "当前 ASR：Whisper GGML。可使用内置默认模型或自己的 GGML 模型。"
         });
+    }
+
+    private void UpdateAsrEngineCard(Border card, FrameworkElement currentBadge, bool isCurrent)
+    {
+        card.Background = isCurrent
+            ? new SolidColorBrush(Color.FromRgb(245, 246, 255))
+            : (Brush)FindResource("SurfaceMutedBrush");
+        card.BorderBrush = (Brush)FindResource(isCurrent ? "AccentBrush" : "BorderBrush");
+        card.BorderThickness = isCurrent ? new Thickness(1.5) : new Thickness(1);
+        currentBadge.Visibility = isCurrent ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void SetAsrStatus(string message)
