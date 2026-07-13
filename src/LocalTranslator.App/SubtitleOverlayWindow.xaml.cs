@@ -27,13 +27,14 @@ public partial class SubtitleOverlayWindow : Window
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpFrameChanged = 0x0020;
-    private const double CollapsedHeight = 150;
+    private const double DefaultCollapsedHeight = 132;
     private const double ExpandedHeight = 465;
 
     private double _bottomOffset;
     private bool _interactionEnabled;
     private bool _showSourceText = true;
     private bool _expanded;
+    private double _collapsedHeight = DefaultCollapsedHeight;
     private int _fontPreset = 1;
     private IntPtr _windowHandle;
     private HwndSource? _windowSource;
@@ -63,6 +64,7 @@ public partial class SubtitleOverlayWindow : Window
         _subtitlePanelEffect = SubtitlePanel.Effect;
         Height = Math.Clamp(overlayHeight, MinHeight, MaxHeight);
         _expanded = Height > 240;
+        if (!_expanded) _collapsedHeight = Height;
         _interactionEnabled = interactionEnabled;
         SetTargetLanguage(targetLanguage);
         ShowInTaskbar = false;
@@ -154,6 +156,23 @@ public partial class SubtitleOverlayWindow : Window
         RefreshLineStyles();
         _bottomOffset = Math.Clamp(bottomOffset, 0, Math.Max(0, SystemParameters.WorkArea.Height - 120));
         if (resetToBottom) UpdateDefaultPosition();
+    }
+
+    public void ApplyHeight(double overlayHeight)
+    {
+        var currentHeight = ActualHeight > 0 ? ActualHeight : Height;
+        var bottom = Top + currentHeight;
+        Height = Math.Clamp(overlayHeight, MinHeight, MaxHeight);
+        _expanded = Height > 240;
+        if (!_expanded) _collapsedHeight = Height;
+        UpdateLayout();
+        var newHeight = ActualHeight > 0 ? ActualHeight : Height;
+        Top = bottom - newHeight;
+        ClampToWorkArea();
+        RefreshToolbarText();
+        TrimSubtitleLines();
+        ScrollToLatestSubtitle();
+        RaisePlacementChanged();
     }
 
     public void SetInteractionEnabled(bool enabled)
@@ -473,6 +492,7 @@ public partial class SubtitleOverlayWindow : Window
         Width = width;
         Height = height;
         _expanded = Height > 240;
+        if (!_expanded) _collapsedHeight = Height;
         RefreshToolbarText();
         _maxTextWidth = Math.Max(240, Width - 42);
         RefreshLineStyles();
@@ -560,7 +580,7 @@ public partial class SubtitleOverlayWindow : Window
         var currentHeight = ActualHeight > 0 ? ActualHeight : Height;
         var bottom = Top + currentHeight;
         _expanded = !_expanded;
-        Height = _expanded ? ExpandedHeight : CollapsedHeight;
+        Height = _expanded ? ExpandedHeight : _collapsedHeight;
         UpdateLayout();
         var newHeight = ActualHeight > 0 ? ActualHeight : Height;
         Top = bottom - newHeight;

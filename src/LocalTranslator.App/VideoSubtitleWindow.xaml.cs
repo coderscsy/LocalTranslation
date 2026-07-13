@@ -21,7 +21,9 @@ public partial class VideoSubtitleWindow : Window
 {
     private const string PreferredVideoModel = "gemma-4-26b-a4b-it-mlx";
     private const int CurrentOverlayLayoutVersion = 4;
+    private const int CurrentOverlayHeightControlVersion = 1;
     private const int CurrentAsrConfigurationVersion = 2;
+    private const double DefaultOverlayHeight = 132;
     private const string DefaultAsrStartCommand = "funasr-server --host 127.0.0.1 --port 8899 --device cpu --model sensevoice";
     private readonly VideoSubtitleService _service;
     private readonly VideoTranslationSessionService _translationSession = new();
@@ -39,7 +41,7 @@ public partial class VideoSubtitleWindow : Window
     private string? _selectedVideoProviderId;
     private double? _overlayLeft;
     private double? _overlayTop;
-    private double _overlayHeight = 150;
+    private double _overlayHeight = DefaultOverlayHeight;
     private double _overlayOpacity = 0.66;
     private TimeSpan _latestOverlayStart = TimeSpan.MinValue;
     private CancellationTokenSource? _modelDownloadCancellation;
@@ -1197,6 +1199,14 @@ public partial class VideoSubtitleWindow : Window
         _overlay?.ApplyLayout(SourceFontSlider.Value, TranslationFontSlider.Value,
             BottomOffsetSlider.Value, OverlayWidthSlider.Value,
             ReferenceEquals(sender, BottomOffsetSlider));
+        if (ReferenceEquals(sender, OverlayHeightSlider))
+        {
+            _overlayHeight = Math.Clamp(
+                OverlayHeightSlider.Value,
+                OverlayHeightSlider.Minimum,
+                OverlayHeightSlider.Maximum);
+            _overlay?.ApplyHeight(_overlayHeight);
+        }
         _overlayOpacity = OverlayOpacitySlider.Value;
         if (_overlayOpacity <= 0.001 && OverlayInteractionCheck.IsChecked != true)
             OverlayInteractionCheck.IsChecked = true;
@@ -1220,8 +1230,14 @@ public partial class VideoSubtitleWindow : Window
     {
         _overlayLeft = null;
         _overlayTop = null;
-        _overlayHeight = 150;
+        _overlayHeight = DefaultOverlayHeight;
+        _applyingOverlayPlacement = true;
+        OverlayHeightSlider.Value = _overlayHeight;
         OverlayWidthSlider.Value = 620;
+        _applyingOverlayPlacement = false;
+        _overlay?.ApplyLayout(SourceFontSlider.Value, TranslationFontSlider.Value,
+            BottomOffsetSlider.Value, OverlayWidthSlider.Value, false);
+        _overlay?.ApplyHeight(_overlayHeight);
         _overlay?.ResetPosition();
         SaveSettings();
     }
@@ -1234,6 +1250,8 @@ public partial class VideoSubtitleWindow : Window
         _applyingOverlayPlacement = true;
         OverlayWidthSlider.Value = Math.Clamp(placement.Width,
             OverlayWidthSlider.Minimum, OverlayWidthSlider.Maximum);
+        OverlayHeightSlider.Value = Math.Clamp(placement.Height,
+            OverlayHeightSlider.Minimum, OverlayHeightSlider.Maximum);
         _applyingOverlayPlacement = false;
         SaveSettings();
     }
@@ -1454,7 +1472,12 @@ public partial class VideoSubtitleWindow : Window
             OverlayInteractionCheck.IsChecked = settings.OverlayInteractionEnabled;
             _overlayLeft = migrateCompactOverlay ? null : settings.OverlayLeft;
             _overlayTop = migrateCompactOverlay ? null : settings.OverlayTop;
-            _overlayHeight = migrateCompactOverlay ? 150 : settings.OverlayHeight;
+            var migrateOverlayHeight = settings.OverlayHeightControlVersion < CurrentOverlayHeightControlVersion;
+            _overlayHeight = migrateOverlayHeight
+                ? DefaultOverlayHeight
+                : Math.Clamp(settings.OverlayHeight,
+                    OverlayHeightSlider.Minimum, OverlayHeightSlider.Maximum);
+            OverlayHeightSlider.Value = _overlayHeight;
             VideoConcurrencyCombo.SelectedItem = Math.Clamp(settings.TranslationConcurrency, 1, 4);
             VideoSceneCombo.SelectedItem = VideoSceneOptions.FirstOrDefault(item =>
                                                 item.Id.Equals(settings.VideoSceneId,
@@ -1511,6 +1534,7 @@ public partial class VideoSubtitleWindow : Window
             TranslationConcurrency = VideoConcurrencyCombo.SelectedItem is int concurrency ? concurrency : 3,
             VideoSceneId = (VideoSceneCombo.SelectedItem as VideoSceneChoice)?.Id ?? "general",
             OverlayLayoutVersion = CurrentOverlayLayoutVersion,
+            OverlayHeightControlVersion = CurrentOverlayHeightControlVersion,
             AsrConfigurationVersion = CurrentAsrConfigurationVersion
         }));
     }
@@ -1544,7 +1568,7 @@ public partial class VideoSubtitleWindow : Window
         public double TranslationFontSize { get; init; } = 24;
         public double BottomOffset { get; init; } = 28;
         public double OverlayWidth { get; init; } = 620;
-        public double OverlayHeight { get; init; } = 150;
+        public double OverlayHeight { get; init; } = DefaultOverlayHeight;
         public double? OverlayOpacity { get; init; } = 0.66;
         public double? OverlayLeft { get; init; }
         public double? OverlayTop { get; init; }
@@ -1554,6 +1578,7 @@ public partial class VideoSubtitleWindow : Window
         public int TranslationConcurrency { get; init; } = 3;
         public string VideoSceneId { get; init; } = "general";
         public int OverlayLayoutVersion { get; init; }
+        public int OverlayHeightControlVersion { get; init; }
         public int AsrConfigurationVersion { get; init; }
     }
 

@@ -239,7 +239,7 @@
                 </WrapPanel>
                 <Grid Grid.Row="4" Grid.ColumnSpan="2" Margin="0,16,0,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/>
+                        <ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Margin="0,0,14,0">
                         <TextBlock Text="原文大小"/>
@@ -258,6 +258,10 @@
                         <Slider x:Name="OverlayWidthSlider" Margin="0,7,0,0" Minimum="520" Maximum="1100" Value="620" TickFrequency="20" IsSnapToTickEnabled="True" ValueChanged="OverlaySetting_Changed"/>
                     </StackPanel>
                     <StackPanel Grid.Column="4" Margin="14,0,0,0">
+                        <TextBlock Text="字幕高度"/>
+                        <Slider x:Name="OverlayHeightSlider" Margin="0,7,0,0" Minimum="118" Maximum="520" Value="132" TickFrequency="10" IsSnapToTickEnabled="True" ValueChanged="OverlaySetting_Changed"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="5" Margin="14,0,0,0">
                         <TextBlock Text="背景不透明度"/>
                         <Slider x:Name="OverlayOpacitySlider" Margin="0,7,0,0" Minimum="0" Maximum="0.92" Value="0.66" TickFrequency="0.02" IsSnapToTickEnabled="True" ValueChanged="OverlaySetting_Changed"/>
                     </StackPanel>
