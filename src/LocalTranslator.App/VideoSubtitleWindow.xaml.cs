@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -15,6 +16,7 @@ public partial class VideoSubtitleWindow : Window
 {
     private const string PreferredVideoModel = "gemma-4-26b-a4b-it-mlx";
     private const int CurrentOverlayLayoutVersion = 4;
+    private const string DefaultAsrStartCommand = "funasr-server --host 127.0.0.1 --port 8899 --device cpu --model sensevoice";
     private readonly VideoSubtitleService _service;
     private readonly VideoTranslationSessionService _translationSession = new();
     private readonly TranslationProviderRouter _providerRouter;
@@ -34,6 +36,8 @@ public partial class VideoSubtitleWindow : Window
     private double _overlayOpacity = 0.66;
     private TimeSpan _latestOverlayStart = TimeSpan.MinValue;
     private CancellationTokenSource? _modelDownloadCancellation;
+    private CancellationTokenSource? _asrServerStartCancellation;
+    private Process? _managedAsrServerProcess;
 
     public VideoSubtitleWindow(
         SecureTranslationProviderStore providerStore,
@@ -65,6 +69,8 @@ public partial class VideoSubtitleWindow : Window
         Closing += VideoSubtitleWindow_Closing;
         Closed += (_, _) =>
         {
+            StopManagedAsrServer();
+            _asrServerStartCancellation?.Dispose();
             _speechModelManager.Dispose();
             _translationSession.Dispose();
         };
@@ -124,6 +130,10 @@ public partial class VideoSubtitleWindow : Window
             SenseVoiceUrlBox is null ||
             SenseVoiceModelBox is null ||
             TestAsrButton is null ||
+            AsrStartCommandBox is null ||
+            InstallAsrDependenciesButton is null ||
+            StartAsrServerButton is null ||
+            StopAsrServerButton is null ||
             AsrStatusText is null ||
             StartButton is null ||
             DefaultModelStatusText is null ||
@@ -202,6 +212,196 @@ public partial class VideoSubtitleWindow : Window
                 EnableSenseVoiceCheck.IsChecked == true &&
                 !_running;
         }
+    }
+
+    private async void InstallAsrDependencies_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(this,
+                "将使用 Python pip 安装 FunASR OpenAI-compatible 服务依赖：funasr fastapi uvicorn python-multipart。\n安装可能需要几分钟，并需要网络。是否继续？",
+                "安装 ASR 依赖",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        InstallAsrDependenciesButton.IsEnabled = false;
+        SetAsrStatus("正在安装 ASR 依赖，请稍候…");
+        try
+        {
+            var output = await RunCommandToExitAsync(
+                "python -m pip install funasr fastapi uvicorn python-multipart",
+                TimeSpan.FromMinutes(10));
+            SetAsrStatus($"ASR 依赖安装完成。{TrimProcessOutput(output)}");
+        }
+        catch (Exception exception)
+        {
+            SetAsrStatus($"ASR 依赖安装失败：{exception.Message}");
+        }
+        finally
+        {
+            InstallAsrDependenciesButton.IsEnabled = true;
+        }
+    }
+
+    private async void StartAsrServer_Click(object sender, RoutedEventArgs e)
+    {
+        StartAsrServerButton.IsEnabled = false;
+        _asrServerStartCancellation?.Cancel();
+        _asrServerStartCancellation?.Dispose();
+        _asrServerStartCancellation = new CancellationTokenSource();
+        var token = _asrServerStartCancellation.Token;
+
+        try
+        {
+            SetAsrStatus("正在检查 ASR 服务是否已经启动…");
+            if (await TryTestAsrEndpointAsync(token))
+            {
+                SetAsrStatus("ASR 服务已经可用。");
+                return;
+            }
+
+            var command = AsrStartCommandBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(command))
+                throw new InvalidOperationException("ASR 服务启动命令不能为空。");
+
+            _managedAsrServerProcess = StartBackgroundCommand(command);
+            SetAsrStatus("ASR 服务正在启动，首次加载模型可能需要 20～90 秒…");
+
+            var deadline = DateTimeOffset.Now.AddSeconds(90);
+            while (DateTimeOffset.Now < deadline)
+            {
+                token.ThrowIfCancellationRequested();
+                if (_managedAsrServerProcess.HasExited)
+                    throw new InvalidOperationException($"ASR 服务进程已退出，退出码：{_managedAsrServerProcess.ExitCode}。请检查启动命令或先安装依赖。");
+
+                await Task.Delay(2000, token);
+                if (await TryTestAsrEndpointAsync(token))
+                {
+                    SetAsrStatus("ASR 服务启动成功，可以开始视频字幕。");
+                    return;
+                }
+            }
+
+            throw new TimeoutException("ASR 服务启动超时。模型首次下载/加载可能较慢，请稍后再次点击测试，或检查命令窗口输出。");
+        }
+        catch (OperationCanceledException)
+        {
+            SetAsrStatus("ASR 服务启动已取消。");
+        }
+        catch (Exception exception)
+        {
+            SetAsrStatus($"ASR 服务启动失败：{exception.Message}");
+        }
+        finally
+        {
+            StartAsrServerButton.IsEnabled = true;
+        }
+    }
+
+    private void StopAsrServer_Click(object sender, RoutedEventArgs e)
+    {
+        _asrServerStartCancellation?.Cancel();
+        if (_managedAsrServerProcess is null || _managedAsrServerProcess.HasExited)
+        {
+            SetAsrStatus("当前没有由本软件启动的 ASR 服务进程。");
+            return;
+        }
+
+        try
+        {
+            StopManagedAsrServer();
+            SetAsrStatus("已停止由本软件启动的 ASR 服务。");
+        }
+        catch (Exception exception)
+        {
+            SetAsrStatus($"停止 ASR 服务失败：{exception.Message}");
+        }
+    }
+
+    private void StopManagedAsrServer()
+    {
+        if (_managedAsrServerProcess is null) return;
+        try
+        {
+            if (!_managedAsrServerProcess.HasExited)
+                _managedAsrServerProcess.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // Best effort cleanup only.
+        }
+        finally
+        {
+            _managedAsrServerProcess.Dispose();
+            _managedAsrServerProcess = null;
+        }
+    }
+
+    private async Task<bool> TryTestAsrEndpointAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await VideoSubtitleService.TestSenseVoiceEndpointAsync(
+                SenseVoiceUrlBox.Text.Trim(),
+                SenseVoiceModelBox.Text.Trim(),
+                cancellationToken);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static Process StartBackgroundCommand(string command)
+    {
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c {command}",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            },
+            EnableRaisingEvents = true
+        };
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        return process;
+    }
+
+    private static async Task<string> RunCommandToExitAsync(string command, TimeSpan timeout)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c {command}",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            }
+        };
+        process.Start();
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(timeout);
+        var output = await outputTask;
+        var error = await errorTask;
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException(TrimProcessOutput(error.Length > 0 ? error : output));
+        return output.Length > 0 ? output : error;
+    }
+
+    private static string TrimProcessOutput(string text)
+    {
+        var value = string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)).Trim();
+        return value.Length <= 160 ? value : $"{value[..160]}…";
     }
 
     private async void InstallDefaultModel_Click(object sender, RoutedEventArgs e)
@@ -671,8 +871,11 @@ public partial class VideoSubtitleWindow : Window
             ModelPathBox.Text = settings.WhisperModelPath ?? string.Empty;
             SenseVoiceUrlBox.Text = NormalizeSenseVoiceBaseUrl(settings.SenseVoiceBaseUrl);
             SenseVoiceModelBox.Text = string.IsNullOrWhiteSpace(settings.SenseVoiceModel)
-                ? "fun-asr-nano"
+                ? "sensevoice"
                 : settings.SenseVoiceModel;
+            AsrStartCommandBox.Text = string.IsNullOrWhiteSpace(settings.AsrStartCommand)
+                ? DefaultAsrStartCommand
+                : settings.AsrStartCommand;
             EnableSenseVoiceCheck.IsChecked = settings.EnableSenseVoice;
             EnableWhisperCheck.IsChecked = settings.EnableWhisper;
             AsrEngineCombo.SelectedItem = AsrEngines.FirstOrDefault(item =>
@@ -726,6 +929,7 @@ public partial class VideoSubtitleWindow : Window
             WhisperModelPath = ModelPathBox.Text.Trim(),
             SenseVoiceBaseUrl = SenseVoiceUrlBox.Text.Trim(),
             SenseVoiceModel = SenseVoiceModelBox.Text.Trim(),
+            AsrStartCommand = AsrStartCommandBox.Text.Trim(),
             EnableSenseVoice = EnableSenseVoiceCheck.IsChecked == true,
             EnableWhisper = EnableWhisperCheck.IsChecked == true,
             SourceFontSize = SourceFontSlider.Value,
@@ -760,7 +964,8 @@ public partial class VideoSubtitleWindow : Window
         public SpeechRecognitionEngine AsrEngine { get; init; } = SpeechRecognitionEngine.SenseVoiceSmall;
         public string? WhisperModelPath { get; init; }
         public string SenseVoiceBaseUrl { get; init; } = "http://127.0.0.1:8899/v1";
-        public string SenseVoiceModel { get; init; } = "fun-asr-nano";
+        public string SenseVoiceModel { get; init; } = "sensevoice";
+        public string AsrStartCommand { get; init; } = DefaultAsrStartCommand;
         public bool EnableSenseVoice { get; init; } = true;
         public bool EnableWhisper { get; init; } = true;
         public double SourceFontSize { get; init; } = 17;

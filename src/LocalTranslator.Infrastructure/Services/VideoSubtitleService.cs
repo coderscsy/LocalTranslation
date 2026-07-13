@@ -43,7 +43,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     private SupportedLanguage _target;
     private SpeechRecognitionEngine _recognitionEngine = SpeechRecognitionEngine.WhisperGgml;
     private Uri? _senseVoiceEndpoint;
-    private string _senseVoiceModel = "fun-asr-nano";
+    private string _senseVoiceModel = "sensevoice";
     private long _recognizedVersion;
     private PendingUtterance? _pendingUtterance;
     private readonly TranslationWindowManager _translationWindow = new();
@@ -81,7 +81,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         else
             _senseVoiceEndpoint = null;
         _senseVoiceModel = string.IsNullOrWhiteSpace(senseVoiceModel)
-            ? "fun-asr-nano"
+            ? "sensevoice"
             : senseVoiceModel.Trim();
         if (_recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall &&
             _senseVoiceEndpoint is not null &&
@@ -420,7 +420,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         CancellationToken cancellationToken = default)
     {
         var endpoint = BuildTranscriptionEndpoint(baseUrl);
-        var modelName = string.IsNullOrWhiteSpace(model) ? "fun-asr-nano" : model.Trim();
+        var modelName = string.IsNullOrWhiteSpace(model) ? "sensevoice" : model.Trim();
         if (!await IsEndpointReachableAsync(endpoint, cancellationToken).ConfigureAwait(false))
             throw new OfflineEngineException(
                 "\u672c\u5730 SenseVoice/FunASR \u670d\u52a1\u672a\u542f\u52a8\u6216\u7aef\u53e3\u4e0d\u53ef\u8fbe\uff0c\u8bf7\u5148\u542f\u52a8 ASR \u670d\u52a1\uff0c\u6216\u5207\u6362\u5230 Whisper GGML\u3002");
