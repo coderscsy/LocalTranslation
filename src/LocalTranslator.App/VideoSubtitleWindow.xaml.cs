@@ -133,7 +133,6 @@ public partial class VideoSubtitleWindow : Window
             AsrStartCommandBox is null ||
             InstallAsrDependenciesButton is null ||
             StartAsrServerButton is null ||
-            StopAsrServerButton is null ||
             AsrStatusText is null ||
             StartButton is null ||
             DefaultModelStatusText is null ||
@@ -217,7 +216,7 @@ public partial class VideoSubtitleWindow : Window
     private async void InstallAsrDependencies_Click(object sender, RoutedEventArgs e)
     {
         if (MessageBox.Show(this,
-                "将使用 Python pip 安装 FunASR OpenAI-compatible 服务依赖：funasr fastapi uvicorn python-multipart。\n安装可能需要几分钟，并需要网络。是否继续？",
+                "将使用 Python 3.11/3.12 安装 FunASR OpenAI-compatible 服务依赖。\n默认 Python 3.14 太新，部分依赖没有 wheel，会导致安装失败；软件会自动避开它。\n安装可能需要几分钟，并需要网络。是否继续？",
                 "安装 ASR 依赖",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Question) != MessageBoxResult.Yes)
@@ -227,9 +226,16 @@ public partial class VideoSubtitleWindow : Window
         SetAsrStatus("正在安装 ASR 依赖，请稍候…");
         try
         {
+            var python = await FindSupportedPythonCommandAsync();
             var output = await RunCommandToExitAsync(
-                "python -m pip install funasr fastapi uvicorn python-multipart",
-                TimeSpan.FromMinutes(10));
+                $"{python} -m pip install -U pip setuptools wheel funasr fastapi uvicorn python-multipart",
+                TimeSpan.FromMinutes(15));
+            if (string.IsNullOrWhiteSpace(AsrStartCommandBox.Text) ||
+                AsrStartCommandBox.Text.Contains("py -3.12 -m funasr.server", StringComparison.OrdinalIgnoreCase))
+            {
+                AsrStartCommandBox.Text = DefaultAsrStartCommand;
+                SaveSettings();
+            }
             SetAsrStatus($"ASR 依赖安装完成。{TrimProcessOutput(output)}");
         }
         catch (Exception exception)
@@ -242,7 +248,18 @@ public partial class VideoSubtitleWindow : Window
         }
     }
 
-    private async void StartAsrServer_Click(object sender, RoutedEventArgs e)
+    private async void ToggleAsrServer_Click(object sender, RoutedEventArgs e)
+    {
+        if (_managedAsrServerProcess is not null && !_managedAsrServerProcess.HasExited)
+        {
+            StopAsrServer();
+            return;
+        }
+
+        await StartAsrServerAsync();
+    }
+
+    private async Task StartAsrServerAsync()
     {
         StartAsrServerButton.IsEnabled = false;
         _asrServerStartCancellation?.Cancel();
@@ -259,7 +276,7 @@ public partial class VideoSubtitleWindow : Window
                 return;
             }
 
-            var command = AsrStartCommandBox.Text.Trim();
+            var command = await NormalizeAsrStartCommandAsync(AsrStartCommandBox.Text.Trim());
             if (string.IsNullOrWhiteSpace(command))
                 throw new InvalidOperationException("ASR 服务启动命令不能为空。");
 
@@ -277,6 +294,7 @@ public partial class VideoSubtitleWindow : Window
                 if (await TryTestAsrEndpointAsync(token))
                 {
                     SetAsrStatus("ASR 服务启动成功，可以开始视频字幕。");
+                    StartAsrServerButton.Content = "停止 ASR 服务";
                     return;
                 }
             }
@@ -297,7 +315,7 @@ public partial class VideoSubtitleWindow : Window
         }
     }
 
-    private void StopAsrServer_Click(object sender, RoutedEventArgs e)
+    private void StopAsrServer()
     {
         _asrServerStartCancellation?.Cancel();
         if (_managedAsrServerProcess is null || _managedAsrServerProcess.HasExited)
@@ -309,6 +327,7 @@ public partial class VideoSubtitleWindow : Window
         try
         {
             StopManagedAsrServer();
+            StartAsrServerButton.Content = "启动 ASR 服务";
             SetAsrStatus("已停止由本软件启动的 ASR 服务。");
         }
         catch (Exception exception)
@@ -351,6 +370,78 @@ public partial class VideoSubtitleWindow : Window
             return false;
         }
     }
+
+    private static async Task<string> NormalizeAsrStartCommandAsync(string command)
+    {
+        command = string.IsNullOrWhiteSpace(command) ? DefaultAsrStartCommand : command.Trim();
+        if (command.StartsWith("funasr-server", StringComparison.OrdinalIgnoreCase) ||
+            command.StartsWith("python ", StringComparison.OrdinalIgnoreCase))
+        {
+            var python = await FindSupportedPythonCommandAsync();
+            if (command.StartsWith("funasr-server", StringComparison.OrdinalIgnoreCase))
+            {
+                var arguments = command["funasr-server".Length..].Trim();
+                var server = await FindFunAsrServerCommandAsync(python);
+                return $"{server} {arguments}".Trim();
+            }
+
+            if (command.StartsWith("python ", StringComparison.OrdinalIgnoreCase))
+                return $"{python} {command["python".Length..].Trim()}";
+
+            return command;
+        }
+
+        return command;
+    }
+
+    private static async Task<string> FindSupportedPythonCommandAsync()
+    {
+        var candidates = new[]
+        {
+            "py -3.12",
+            "py -3.11",
+            "python"
+        };
+        var newestUnsupported = string.Empty;
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                var version = await RunCommandToExitAsync(
+                    $"{candidate} -c \"import sys; print(str(sys.version_info.major)+'.'+str(sys.version_info.minor))\"",
+                    TimeSpan.FromSeconds(10));
+                version = version.Trim();
+                if (Version.TryParse(version, out var parsed))
+                {
+                    if (parsed.Major == 3 && parsed.Minor is >= 10 and <= 12)
+                        return candidate;
+                    newestUnsupported = $"{candidate} = Python {version}";
+                }
+            }
+            catch
+            {
+                // Try the next candidate.
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"没有找到可用于 FunASR 的 Python 3.10～3.12。{newestUnsupported}。当前 Python 3.14 太新，editdistance 等依赖容易安装失败；请安装 Python 3.12 后重试。");
+    }
+
+    private static async Task<string> FindFunAsrServerCommandAsync(string pythonCommand)
+    {
+        var scripts = (await RunCommandToExitAsync(
+            $"{pythonCommand} -c \"import sysconfig; print(sysconfig.get_path('scripts'))\"",
+            TimeSpan.FromSeconds(10))).Trim();
+        var exe = Path.Combine(scripts, "funasr-server.exe");
+        if (File.Exists(exe)) return QuoteCommandPath(exe);
+        var script = Path.Combine(scripts, "funasr-server");
+        if (File.Exists(script)) return QuoteCommandPath(script);
+        return "funasr-server";
+    }
+
+    private static string QuoteCommandPath(string path) =>
+        path.Contains(' ') ? $"\"{path}\"" : path;
 
     private static Process StartBackgroundCommand(string command)
     {
@@ -875,7 +966,7 @@ public partial class VideoSubtitleWindow : Window
                 : settings.SenseVoiceModel;
             AsrStartCommandBox.Text = string.IsNullOrWhiteSpace(settings.AsrStartCommand)
                 ? DefaultAsrStartCommand
-                : settings.AsrStartCommand;
+                : NormalizeSavedAsrStartCommand(settings.AsrStartCommand);
             EnableSenseVoiceCheck.IsChecked = settings.EnableSenseVoice;
             EnableWhisperCheck.IsChecked = settings.EnableWhisper;
             AsrEngineCombo.SelectedItem = AsrEngines.FirstOrDefault(item =>
@@ -958,6 +1049,11 @@ public partial class VideoSubtitleWindow : Window
             ? "http://127.0.0.1:8899/v1"
             : trimmed;
     }
+
+    private static string NormalizeSavedAsrStartCommand(string value) =>
+        value.Contains("py -3.12 -m funasr.server", StringComparison.OrdinalIgnoreCase)
+            ? DefaultAsrStartCommand
+            : value.Trim();
 
     private sealed class VideoSettings
     {

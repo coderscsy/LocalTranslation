@@ -76,7 +76,6 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel Margin="0,0,10,0">
                                 <TextBlock FontSize="12" FontWeight="SemiBold" Text="ASR 服务启动命令"/>
@@ -89,10 +88,7 @@
                                     Content="安装依赖" Click="InstallAsrDependencies_Click"/>
                             <Button x:Name="StartAsrServerButton" Grid.Column="2" Height="42" Margin="0,19,8,0"
                                     Padding="12,0" Style="{StaticResource PrimaryButtonStyle}"
-                                    Content="启动 ASR 服务" Click="StartAsrServer_Click"/>
-                            <Button x:Name="StopAsrServerButton" Grid.Column="3" Height="42" Margin="0,19,0,0"
-                                    Padding="12,0" Style="{StaticResource SecondaryButtonStyle}"
-                                    Content="停止服务" Click="StopAsrServer_Click"/>
+                                    Content="启动 ASR 服务" Click="ToggleAsrServer_Click"/>
                         </Grid>
                         <Border Grid.Row="3" Grid.ColumnSpan="3" Margin="0,12,0,0"
                                 Padding="12,9" Background="#F8F9FC"
