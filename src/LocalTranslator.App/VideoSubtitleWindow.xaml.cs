@@ -116,6 +116,21 @@ public partial class VideoSubtitleWindow : Window
 
     private void RefreshAsrEngineUi()
     {
+        if (WhisperModelTitle is null ||
+            ModelPathBox is null ||
+            DefaultModelPathText is null ||
+            InstallDefaultModelButton is null ||
+            UninstallDefaultModelButton is null ||
+            SenseVoiceUrlBox is null ||
+            SenseVoiceModelBox is null ||
+            TestAsrButton is null ||
+            StartButton is null ||
+            DefaultModelStatusText is null ||
+            StatusText is null)
+        {
+            return;
+        }
+
         var engine = (AsrEngineCombo.SelectedItem as AsrEngineChoice)?.Engine
                      ?? SpeechRecognitionEngine.SenseVoiceSmall;
         if (!IsAsrEngineEnabled(engine))
@@ -153,8 +168,8 @@ public partial class VideoSubtitleWindow : Window
 
     private bool IsAsrEngineEnabled(SpeechRecognitionEngine engine) => engine switch
     {
-        SpeechRecognitionEngine.SenseVoiceSmall => EnableSenseVoiceCheck.IsChecked == true,
-        SpeechRecognitionEngine.WhisperGgml => EnableWhisperCheck.IsChecked == true,
+        SpeechRecognitionEngine.SenseVoiceSmall => EnableSenseVoiceCheck?.IsChecked == true,
+        SpeechRecognitionEngine.WhisperGgml => EnableWhisperCheck?.IsChecked == true,
         _ => false
     };
 
