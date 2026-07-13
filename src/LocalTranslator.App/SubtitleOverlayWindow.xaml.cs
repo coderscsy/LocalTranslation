@@ -251,10 +251,11 @@ public partial class SubtitleOverlayWindow : Window
         var showSource = bilingual && _showSourceText && !existingTranslationDuplicatesSource;
         line.SourceText = showSource ? SubtitleTextFormatter.FormatForDisplay(sourceText) : string.Empty;
         line.SourceVisibility = showSource ? Visibility.Visible : Visibility.Collapsed;
-        // Keep the latest stable preview while the same ASR sentence grows. Clearing it
-        // on every partial result caused a screen full of duplicated "正在翻译…" rows.
+        // Keep one pending row while the same ASR sentence grows. Translation starts
+        // only after a real speech boundary, so an unfinished clause is never shown
+        // as if it were a completed translation.
         if (isNewLine || string.IsNullOrWhiteSpace(line.TranslationText))
-            line.TranslationText = "正在翻译…";
+            line.TranslationText = "正在听…";
         line.IsPending = true;
         ApplyLineStyle(line, true);
         TrimSubtitleLines();

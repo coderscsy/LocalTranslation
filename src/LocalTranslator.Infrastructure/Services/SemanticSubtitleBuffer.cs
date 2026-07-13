@@ -11,12 +11,6 @@ public static class SemanticSubtitleBuffer
         "when ", "while ", "into ", "about ", "a ", "an ", "the "
     ];
 
-    private static readonly string[] WeakEnglishEndings =
-    [
-        "completion", "studies", "passion", "field", "accomplishment", "accomplishments",
-        "pursue further", "driven by", "strong", "academic", "undergraduate", "following my"
-    ];
-
     public static string MergeFragments(IEnumerable<string> fragments, SupportedLanguage language)
     {
         var merged = string.Empty;
@@ -30,10 +24,11 @@ public static class SemanticSubtitleBuffer
         var normalized = Normalize(text);
         if (string.IsNullOrWhiteSpace(normalized)) return false;
 
-        // A normal spoken sentence can easily last 6-10 seconds. The old 4.2 second
-        // hard limit split one sentence into several independently translated rows.
-        return duration >= TimeSpan.FromSeconds(12) ||
-               normalized.Length >= 300;
+        // A hard limit is only a memory/latency guard for unusually long speech.
+        // Ordinary clauses must wait for an actual pause instead of being translated
+        // merely because an ASR rolling window reached its maximum duration.
+        return duration >= TimeSpan.FromSeconds(24) ||
+               normalized.Length >= 600;
     }
 
     public static bool ShouldFlushOnSpeechBoundary(string text, TimeSpan duration)
@@ -41,17 +36,14 @@ public static class SemanticSubtitleBuffer
         var normalized = Normalize(text);
         if (string.IsNullOrWhiteSpace(normalized)) return false;
         if (ShouldFlush(normalized, duration)) return true;
-        if (LooksLikeContinuationFragment(normalized)) return false;
-        if (HasWeakEnding(normalized)) return false;
+        if (duration < TimeSpan.FromSeconds(0.75)) return false;
 
+        // This method is called only for a real trailing-silence boundary. Once the
+        // speaker has paused, commit even a short reply so the next utterance starts
+        // on a new subtitle row instead of being glued to the previous sentence.
         var wordCount = CountWords(normalized);
-        if (wordCount <= 2) return false;
-
-        // Short ASR chunks are provisional even when the recognizer inserts a period.
-        // Only a complete-looking clause, or a sufficiently long unpunctuated phrase,
-        // may close the utterance at a detected speech boundary.
-        return duration >= TimeSpan.FromSeconds(1.2) &&
-               (EndsSentence(normalized) || duration >= TimeSpan.FromSeconds(3.2));
+        return wordCount >= 2 || ContainsCjk(normalized) ||
+               duration >= TimeSpan.FromSeconds(1.2);
     }
 
     public static string JoinFragments(string existing, string next, SupportedLanguage language)
@@ -95,12 +87,6 @@ public static class SemanticSubtitleBuffer
         return wordCount <= 2 ||
                wordCount <= 9 && lower.StartsWith("following ", StringComparison.Ordinal) ||
                wordCount <= 7 && ContinuationStarters.Any(lower.StartsWith);
-    }
-
-    private static bool HasWeakEnding(string text)
-    {
-        var lower = text.Trim().TrimEnd('.', '!', '?', '。', '！', '？').ToLowerInvariant();
-        return WeakEnglishEndings.Any(ending => lower.EndsWith(ending, StringComparison.Ordinal));
     }
 
     private static int CountWords(string text) =>

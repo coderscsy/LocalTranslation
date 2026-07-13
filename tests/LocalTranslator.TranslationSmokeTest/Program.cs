@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using System.Text;
 using LocalTranslator.Core.Abstractions;
 using LocalTranslator.Core.Models;
@@ -189,7 +190,7 @@ if (mergedFinanceSentence != expectedFinanceSentence ||
         TimeSpan.FromSeconds(4.3)) ||
     !SemanticSubtitleBuffer.ShouldFlush(
         "Following my completion of undergraduate studies, I am driven by a strong passion to pursue further academic accomplishments in the field of finance.",
-        TimeSpan.FromSeconds(12.1)))
+        TimeSpan.FromSeconds(24.1)))
 {
     throw new InvalidOperationException("Semantic subtitle buffering smoke test failed.");
 }
@@ -209,8 +210,10 @@ var mergedBrokenFinanceSentence = SemanticSubtitleBuffer.MergeFragments(
     SupportedLanguage.English);
 if (SemanticSubtitleBuffer.ShouldFlush("Following my completion of undergraduate studies.", TimeSpan.FromSeconds(1.4)) ||
     SemanticSubtitleBuffer.ShouldFlush("Strong passion.", TimeSpan.FromSeconds(1)) ||
-    SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary("studies.", TimeSpan.FromSeconds(1.1)) ||
-    SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary("of finance.", TimeSpan.FromSeconds(1.1)) ||
+    !SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary("studies.", TimeSpan.FromSeconds(1.2)) ||
+    !SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary("of finance.", TimeSpan.FromSeconds(1.1)) ||
+    !SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary("说完了", TimeSpan.FromSeconds(1.0)) ||
+    SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary("unfinished", TimeSpan.FromSeconds(0.5)) ||
     !SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary(expectedFinanceSentence, TimeSpan.FromSeconds(8.3)) ||
     mergedBrokenFinanceSentence.Contains("field. of", StringComparison.OrdinalIgnoreCase))
 {
@@ -227,10 +230,13 @@ var rollingFinanceFragments = new[]
 for (var index = 0; index < rollingFinanceFragments.Length; index++)
 {
     var (text, seconds) = rollingFinanceFragments[index];
-    var shouldFlush = SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary(text, TimeSpan.FromSeconds(seconds));
-    if (shouldFlush != (index == rollingFinanceFragments.Length - 1))
-        throw new InvalidOperationException($"Rolling finance sentence was finalized at the wrong revision: {index}.");
+    if (SemanticSubtitleBuffer.ShouldFlush(text, TimeSpan.FromSeconds(seconds)))
+        throw new InvalidOperationException($"Rolling finance sentence was finalized without a speech boundary: {index}.");
 }
+if (!SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary(
+        rollingFinanceFragments[^1].Item1,
+        TimeSpan.FromSeconds(rollingFinanceFragments[^1].Item2)))
+    throw new InvalidOperationException("Completed rolling finance sentence did not finalize at the speech boundary.");
 
 var realSenseVoiceWindowFragments = new[]
 {
@@ -248,6 +254,58 @@ if (!mergedSenseVoiceWindows.Equals(expectedSenseVoiceWindows, StringComparison.
         TimeSpan.FromSeconds(9.2)))
 {
     throw new InvalidOperationException("Real SenseVoice rolling-window merge smoke test failed.");
+}
+
+await using (var segmentationService = new VideoSubtitleService(service, new ConsoleLogger()))
+{
+    segmentationService.SetTargetLanguage(SupportedLanguage.ChineseSimplified);
+    var sourceSegments = new List<SubtitleSegment>();
+    var finalSegments = new List<SubtitleSegment>();
+    segmentationService.SourceSegmentReady += (_, segment) => sourceSegments.Add(segment);
+    segmentationService.SegmentReady += (_, segment) => finalSegments.Add(segment);
+
+    var appendRecognizedText = typeof(VideoSubtitleService).GetMethod(
+        "AppendRecognizedText", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("AppendRecognizedText was not found.");
+    var flushPendingUtterance = typeof(VideoSubtitleService).GetMethod(
+        "FlushPendingUtterance", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("FlushPendingUtterance was not found.");
+
+    appendRecognizedText.Invoke(segmentationService,
+        ["第一句话", "第一句话", SupportedLanguage.ChineseSimplified,
+            TimeSpan.Zero, TimeSpan.FromSeconds(2), false]);
+    if (sourceSegments.Count != 1 || finalSegments.Count != 0)
+        throw new InvalidOperationException("An unfinished ASR sentence was published as a final translation.");
+
+    flushPendingUtterance.Invoke(segmentationService, null);
+    appendRecognizedText.Invoke(segmentationService,
+        ["第二句话", "第二句话", SupportedLanguage.ChineseSimplified,
+            TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(5), false]);
+    if (sourceSegments.Count != 2 ||
+        sourceSegments[0].Sequence == sourceSegments[1].Sequence ||
+        finalSegments.Count != 1)
+    {
+        throw new InvalidOperationException("Completed speech did not start a new subtitle row.");
+    }
+    flushPendingUtterance.Invoke(segmentationService, null);
+    if (finalSegments.Count != 2)
+        throw new InvalidOperationException("Final subtitle rows were not committed exactly once.");
+
+    var pcmBufferField = typeof(VideoSubtitleService).GetField(
+        "_pcmBuffer", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("PCM buffer was not found.");
+    var flushChunk = typeof(VideoSubtitleService).GetMethod(
+        "FlushChunkLocked", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("FlushChunkLocked was not found.");
+    var pcmBuffer = (List<byte>)pcmBufferField.GetValue(segmentationService)!;
+    for (var sample = 0; sample < 32000; sample++)
+    {
+        pcmBuffer.Add(0x10);
+        pcmBuffer.Add(0x27);
+    }
+    flushChunk.Invoke(segmentationService, [true]);
+    if (pcmBuffer.Count != 0)
+        throw new InvalidOperationException("Audio overlap leaked across a real speech boundary.");
 }
 
 const string stableParakeetPrefix = "Following my completion of undergraduate studies,";

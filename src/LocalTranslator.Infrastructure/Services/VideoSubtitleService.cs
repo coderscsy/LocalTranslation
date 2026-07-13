@@ -25,11 +25,11 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     private const double ParakeetOverlapSeconds = 0.85;
     private const double SenseVoiceMinimumChunkSeconds = 1.8;
     private const double SenseVoiceMaximumChunkSeconds = 4.8;
-    private const double SenseVoiceTailSilenceSeconds = 0.55;
+    private const double SenseVoiceTailSilenceSeconds = 0.75;
     private const double SenseVoiceOverlapSeconds = 0.90;
     private const double WhisperMinimumChunkSeconds = 1.2;
     private const double WhisperMaximumChunkSeconds = 2.8;
-    private const double WhisperTailSilenceSeconds = 0.45;
+    private const double WhisperTailSilenceSeconds = 0.65;
     private const double WhisperOverlapSeconds = 0.35;
     private static readonly WaveFormat WhisperWaveFormat = new(16000, 16, 1);
     private static readonly Regex SubtitleArtifactPattern = new(
@@ -279,7 +279,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         var pcm = _pcmBuffer.ToArray();
         var duration = TimeSpan.FromSeconds((double)pcm.Length / WhisperWaveFormat.AverageBytesPerSecond);
         if (!IsSilent(pcm) && !_chunks.Writer.TryWrite(new AudioChunk(
-                pcm, _nextChunkStart, duration, isFinalSnapshot, IsCumulative: true)))
+                pcm, _nextChunkStart, duration, hasTailSilence, IsCumulative: true)))
         {
             logger.Info("ASR audio queue reached its safety limit; the newest Parakeet revision could not be queued.");
         }
@@ -332,9 +332,11 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         _pcmBuffer.Clear();
         var duration = TimeSpan.FromSeconds((double)pcm.Length / WhisperWaveFormat.AverageBytesPerSecond);
         var chunk = new AudioChunk(pcm, _nextChunkStart, duration, isSpeechBoundary);
-        var overlapBytes = Math.Min(
-            (int)(WhisperWaveFormat.AverageBytesPerSecond * CurrentOverlapSeconds) & ~1,
-            Math.Max(0, pcm.Length - WhisperWaveFormat.AverageBytesPerSecond));
+        var overlapBytes = isSpeechBoundary
+            ? 0
+            : Math.Min(
+                (int)(WhisperWaveFormat.AverageBytesPerSecond * CurrentOverlapSeconds) & ~1,
+                Math.Max(0, pcm.Length - WhisperWaveFormat.AverageBytesPerSecond));
         if (overlapBytes > 0)
             _pcmBuffer.AddRange(pcm.AsSpan(pcm.Length - overlapBytes, overlapBytes).ToArray());
         _nextChunkStart += TimeSpan.FromSeconds(
@@ -700,19 +702,9 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             string.Empty,
             _pendingUtterance.Sequence));
 
-        if (RequiresTranslation(_pendingUtterance))
-        {
-            QueuePreviewTranslation(_pendingUtterance);
-        }
-        else
-        {
-            SegmentReady?.Invoke(this, new SubtitleSegment(
-                _pendingUtterance.Start,
-                _pendingUtterance.End,
-                SubtitleTextFormatter.FormatForDisplay(_pendingUtterance.DisplayedSource),
-                NormalizeForTarget(_pendingUtterance.SourceText, _target),
-                _pendingUtterance.Sequence));
-        }
+        // Intermediate ASR revisions are source-only. Publishing a translation here
+        // makes an unfinished clause look final and causes several corrections to
+        // flash on screen. The translation is queued only after a real speech pause.
 
         if (ShouldFlushPending(_pendingUtterance))
             FlushPendingUtterance();
@@ -763,15 +755,6 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     private static bool ShouldFlushPending(PendingUtterance pending) =>
         SemanticSubtitleBuffer.ShouldFlush(pending.SourceText, pending.End - pending.Start);
 
-    private void QueuePreviewTranslation(PendingUtterance pending)
-    {
-        if (!RequiresTranslation(pending) ||
-            !ShouldRequestPreviewTranslation(pending.SourceText, pending.LastQueuedSource))
-            return;
-
-        QueueTranslation(pending, false);
-    }
-
     private void QueueTranslation(PendingUtterance pending, bool isFinal)
     {
         var sourceText = pending.SourceText.Trim();
@@ -798,17 +781,6 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             pending.SourceText,
             pending.SourceLanguage,
             _target);
-
-    private static bool ShouldRequestPreviewTranslation(string sourceText, string lastQueuedSource)
-    {
-        var normalized = SemanticSubtitleBuffer.Normalize(sourceText);
-        if (normalized.Length < 18) return false;
-        if (normalized.Length - lastQueuedSource.Length < 12) return false;
-
-        var language = TextLanguageDetector.Detect(normalized);
-        return language is SupportedLanguage.ChineseSimplified or SupportedLanguage.Japanese ||
-               normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length >= 5;
-    }
 
     private async Task ProcessTranslationsAsync(int workerId, CancellationToken cancellationToken)
     {
