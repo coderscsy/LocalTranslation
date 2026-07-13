@@ -1,0 +1,208 @@
+<Window x:Class="LocalTranslator.App.VideoSubtitleWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="视频实时字幕" Width="1040" Height="820" MinWidth="900" MinHeight="700"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource WindowBackgroundBrush}">
+    <Grid Margin="26">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <StackPanel>
+            <TextBlock FontSize="25" FontWeight="SemiBold" Text="视频对话实时翻译"/>
+            <TextBlock Margin="0,5,0,0" Foreground="{StaticResource MutedTextBrush}"
+                       Text="采集当前输出设备的系统声音，Whisper 本地识别人物对话，再由当前翻译 Provider 生成字幕。"/>
+        </StackPanel>
+        <ScrollViewer Grid.Row="1" Margin="0,18,0,14"
+                      HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="0,0,8,0">
+        <Border Padding="18" Style="{StaticResource CardStyle}">
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.ColumnSpan="2">
+                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock FontSize="14" FontWeight="SemiBold" Text="默认语音识别模型"/>
+                            <TextBlock Margin="0,3,0,0" FontSize="11" Foreground="{StaticResource MutedTextBrush}"
+                                       Text="Whisper Small Q5_1 · 中文均衡版 · 约 181 MiB · 上下文与重叠窗口提升对白准确率"/>
+                        </StackPanel>
+                        <Border Grid.Column="1" Padding="10,5" VerticalAlignment="Center" Background="#FFF7E8" CornerRadius="12">
+                            <TextBlock x:Name="DefaultModelStatusText" FontSize="11" FontWeight="SemiBold" Foreground="#B54708" Text="未安装"/>
+                        </Border>
+                    </Grid>
+                    <Border Margin="0,12,0,0" Padding="14,12" Background="#F8F9FC" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10">
+                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="DefaultModelPathText" FontFamily="Consolas" FontSize="10" Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                <StackPanel x:Name="DefaultModelProgressPanel" Margin="0,8,15,0" Visibility="Collapsed">
+                                    <ProgressBar x:Name="DefaultModelProgress" Height="6" Maximum="100"/>
+                                    <TextBlock x:Name="DefaultModelProgressText" Margin="0,5,0,0" FontSize="10" Foreground="{StaticResource MutedTextBrush}"/>
+                                </StackPanel>
+                            </StackPanel>
+                            <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                                <Button x:Name="InstallDefaultModelButton" Padding="14,8" Style="{StaticResource PrimaryButtonStyle}"
+                                        Content="下载安装默认模型" Click="InstallDefaultModel_Click"/>
+                                <Button x:Name="UninstallDefaultModelButton" Margin="8,0,0,0" Padding="14,8" Style="{StaticResource SecondaryButtonStyle}"
+                                        Content="卸载默认模型" Visibility="Collapsed" Click="UninstallDefaultModel_Click"/>
+                                <Button x:Name="CancelDefaultDownloadButton" Margin="8,0,0,0" Padding="14,8" Style="{StaticResource SecondaryButtonStyle}"
+                                        Content="取消下载" Visibility="Collapsed" Click="CancelDefaultDownload_Click"/>
+                            </WrapPanel>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Margin="0,14,0,0" FontSize="12" FontWeight="SemiBold" Text="或者使用自己的 Whisper GGML 模型"/>
+                    <Grid Margin="0,7,0,12"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBox x:Name="ModelPathBox" Height="42"/>
+                        <Button Grid.Column="1" Margin="8,0,0,0" Padding="16,7" Style="{StaticResource SecondaryButtonStyle}" Content="浏览文件" Click="BrowseModel_Click"/>
+                    </Grid>
+                </StackPanel>
+                <StackPanel Grid.Row="2" Margin="0,0,8,0">
+                    <TextBlock Text="源语言"/><ComboBox x:Name="SourceCombo" Margin="0,6,0,0" Height="40" ItemsSource="{Binding SourceLanguages}"
+                                                        ItemTemplate="{StaticResource LanguageItemTemplate}"/>
+                </StackPanel>
+                <StackPanel Grid.Row="2" Grid.Column="1" Margin="8,0,0,0">
+                    <TextBlock Text="目标语言"/><ComboBox x:Name="TargetCombo" Margin="0,6,0,0" Height="40" ItemsSource="{Binding TargetLanguages}"
+                                                        ItemTemplate="{StaticResource LanguageItemTemplate}"/>
+                </StackPanel>
+                <WrapPanel Grid.Row="3" Grid.ColumnSpan="2" Margin="0,15,0,0" Orientation="Horizontal">
+                    <RadioButton x:Name="LiveModeRadio" IsChecked="True" VerticalAlignment="Center" Content="实时字幕"/>
+                    <RadioButton x:Name="MovieModeRadio" Margin="20,0,0,0" VerticalAlignment="Center" Content="电影模式（记录时间轴）"/>
+                    <CheckBox x:Name="BilingualCheck" Margin="25,0,0,0" IsChecked="True" VerticalAlignment="Center" Content="双语字幕"/>
+                    <CheckBox x:Name="OverlayCheck" Margin="20,0,0,0" IsChecked="True" VerticalAlignment="Center" Content="屏幕叠加字幕"/>
+                    <CheckBox x:Name="OverlayInteractionCheck" Margin="20,0,0,0" IsChecked="True" VerticalAlignment="Center"
+                              Content="鼠标拖动/缩放" Checked="OverlayInteraction_Changed" Unchecked="OverlayInteraction_Changed"/>
+                    <Button Margin="16,-6,0,-6" Padding="12,6" Style="{StaticResource SecondaryButtonStyle}"
+                            Content="重置字幕位置" Click="ResetOverlayPosition_Click"/>
+                </WrapPanel>
+                <Grid Grid.Row="4" Grid.ColumnSpan="2" Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Margin="0,0,14,0">
+                        <TextBlock Text="原文大小"/>
+                        <Slider x:Name="SourceFontSlider" Margin="0,7,0,0" Minimum="12" Maximum="32" Value="16" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="OverlaySetting_Changed"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="0,0,14,0">
+                        <TextBlock Text="译文大小"/>
+                        <Slider x:Name="TranslationFontSlider" Margin="0,7,0,0" Minimum="16" Maximum="42" Value="24" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="OverlaySetting_Changed"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Margin="0,0,14,0">
+                        <TextBlock Text="距屏幕底部"/>
+                        <Slider x:Name="BottomOffsetSlider" Margin="0,7,0,0" Minimum="0" Maximum="650" Value="28" TickFrequency="10" IsSnapToTickEnabled="True" ValueChanged="OverlaySetting_Changed"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="3">
+                        <TextBlock Text="字幕宽度"/>
+                        <Slider x:Name="OverlayWidthSlider" Margin="0,7,0,0" Minimum="520" Maximum="1100" Value="620" TickFrequency="20" IsSnapToTickEnabled="True" ValueChanged="OverlaySetting_Changed"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="4" Margin="14,0,0,0">
+                        <TextBlock Text="背景不透明度"/>
+                        <Slider x:Name="OverlayOpacitySlider" Margin="0,7,0,0" Minimum="0" Maximum="0.92" Value="0.66" TickFrequency="0.02" IsSnapToTickEnabled="True" ValueChanged="OverlaySetting_Changed"/>
+                    </StackPanel>
+                </Grid>
+                <Border Grid.Row="5" Grid.ColumnSpan="2" Margin="0,16,0,0" Padding="16,14"
+                        Background="#F8F9FC" BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="12">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.05*" MinWidth="220"/>
+                            <ColumnDefinition Width="1.7*" MinWidth="280"/>
+                            <ColumnDefinition Width="184"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Margin="0,0,14,0">
+                            <TextBlock FontSize="12" FontWeight="SemiBold" Text="视频翻译服务"/>
+                            <ComboBox x:Name="VideoProviderCombo" Margin="0,7,0,0" Height="42" MinWidth="0"
+                                      HorizontalAlignment="Stretch"
+                                      ItemsSource="{Binding VideoProviders}" DisplayMemberPath="DisplayName"
+                                      SelectionChanged="VideoProvider_SelectionChanged"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Margin="0,0,14,0">
+                            <TextBlock FontSize="12" FontWeight="SemiBold" Text="翻译模型"/>
+                            <ComboBox x:Name="VideoModelCombo" Margin="0,7,0,0" Height="42" MinWidth="0"
+                                      HorizontalAlignment="Stretch" IsEditable="True"
+                                      ItemsSource="{Binding VideoModels}"
+                                      SelectionChanged="VideoModel_SelectionChanged"
+                                      LostKeyboardFocus="VideoModel_LostKeyboardFocus"/>
+                        </StackPanel>
+
+                        <Button x:Name="TestVideoProviderButton" Grid.Column="2"
+                                Height="42" Margin="0,25,0,0" Padding="14,0"
+                                HorizontalAlignment="Stretch" VerticalAlignment="Top"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Content="选择翻译模型" Click="ChooseVideoModel_Click"/>
+
+                        <Grid Grid.Row="1" Grid.ColumnSpan="3" Margin="0,13,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="240"/>
+                                <ColumnDefinition Width="150"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Margin="0,0,14,0">
+                                <TextBlock FontSize="12" FontWeight="SemiBold" Text="翻译场景"/>
+                                <ComboBox x:Name="VideoSceneCombo" Margin="0,7,0,0" Height="42" MinWidth="0"
+                                          HorizontalAlignment="Stretch"
+                                          ItemsSource="{Binding VideoSceneOptions}"
+                                          SelectionChanged="VideoScene_SelectionChanged"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock FontSize="12" FontWeight="SemiBold" Text="并发请求"/>
+                                <ComboBox x:Name="VideoConcurrencyCombo" Margin="0,7,0,0" Height="42" MinWidth="0"
+                                          HorizontalAlignment="Stretch"
+                                          ItemsSource="{Binding VideoConcurrencyOptions}"
+                                          SelectionChanged="VideoConcurrency_SelectionChanged"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Grid.Row="2" Grid.ColumnSpan="3" Margin="0,11,0,0" Orientation="Horizontal">
+                            <Ellipse Width="6" Height="6" Margin="0,0,7,0" VerticalAlignment="Center"
+                                     Fill="{StaticResource AccentBrush}"/>
+                            <TextBlock x:Name="VideoProviderStatusText" VerticalAlignment="Center"
+                                       FontSize="11" Foreground="{StaticResource MutedTextBrush}"
+                                       Text="视频字幕使用独立模型配置；普通文字翻译 Provider 不受影响。"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+        <Border Height="190" Margin="0,14,0,0" Padding="16" Style="{StaticResource CardStyle}">
+            <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedTextBrush}" Text="尚未开始。播放视频后点击“开始翻译”。"/>
+                <ListBox x:Name="SubtitleList" Grid.Row="1" Margin="0,12,0,0" BorderThickness="0" Background="Transparent">
+                    <ListBox.ItemTemplate><DataTemplate><Border Margin="0,0,0,8" Padding="12" Background="#F8F9FC" CornerRadius="8">
+                        <StackPanel><TextBlock FontSize="10" Foreground="#98A2B3" Text="{Binding TimeText}"/>
+                            <TextBlock Margin="0,4,0,0" Foreground="{StaticResource MutedTextBrush}" Text="{Binding SourceText}" TextWrapping="Wrap"/>
+                            <TextBlock Margin="0,4,0,0" FontSize="15" FontWeight="SemiBold" Text="{Binding TranslatedText}" TextWrapping="Wrap"/>
+                        </StackPanel></Border></DataTemplate></ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </Border>
+        </StackPanel>
+        </ScrollViewer>
+        <Border Grid.Row="2" Padding="14,10"
+                Background="White" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1" CornerRadius="12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Margin="0,0,18,0" VerticalAlignment="Center"
+                           Foreground="{StaticResource MutedTextBrush}" FontSize="11"
+                           TextWrapping="Wrap"
+                           Text="当前采集默认输出设备的全部声音；最小化后字幕继续运行。"/>
+                <StackPanel Grid.Column="1" HorizontalAlignment="Right" Orientation="Horizontal">
+                    <Button x:Name="ExportButton" MinWidth="112" Height="42" Padding="16,0"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Content="导出 SRT" IsEnabled="False" Click="ExportSrt_Click"/>
+                    <Button x:Name="StartButton" MinWidth="120" Height="42" Margin="10,0,0,0" Padding="18,0"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Content="开始翻译" Click="StartStop_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

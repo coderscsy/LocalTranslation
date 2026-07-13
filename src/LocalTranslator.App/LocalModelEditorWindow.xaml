@@ -1,0 +1,127 @@
+<Window x:Class="LocalTranslator.App.LocalModelEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="本地模型配置" Width="820" Height="820" MinWidth="760" MinHeight="680"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource WindowBackgroundBrush}"
+        FontFamily="Segoe UI" ResizeMode="CanResizeWithGrip" ShowInTaskbar="False">
+    <Window.Resources>
+        <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15"/><Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+        </Style>
+        <Style x:Key="LabelStyle" TargetType="TextBlock">
+            <Setter Property="Margin" Value="1,0,0,6"/><Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+        </Style>
+        <Style x:Key="EditorFieldStyle" TargetType="TextBox">
+            <Setter Property="Height" Value="42"/><Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Background" Value="White"/><Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="13"/><Setter Property="AcceptsReturn" Value="False"/>
+            <Setter Property="TextWrapping" Value="NoWrap"/><Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalScrollBarVisibility" Value="Disabled"/>
+            <Style.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/></Trigger></Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+
+        <Border Padding="30,23" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock FontSize="23" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Text="配置自己的本地模型"/>
+                    <TextBlock Margin="0,6,0,0" FontSize="12" Foreground="{StaticResource MutedTextBrush}"
+                               Text="支持外部 GGUF 文件，也支持由软件下载并托管；配置不会锁定模型品牌。"/>
+                </StackPanel>
+                <Border Grid.Column="1" Padding="11,6" VerticalAlignment="Center" Background="#EAEBFF" CornerRadius="14">
+                    <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" Text="GGUF · LLamaSharp"/>
+                </Border>
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" Padding="30,22" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <Border Padding="20,18" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitleStyle}" Text="基本信息"/>
+                        <Grid Margin="0,15,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="3*"/></Grid.ColumnDefinitions>
+                            <StackPanel Margin="0,0,9,0"><TextBlock Style="{StaticResource LabelStyle}" Text="显示名称 *"/>
+                                <TextBox x:Name="NameBox" Style="{StaticResource EditorFieldStyle}"/></StackPanel>
+                            <StackPanel Grid.Column="1" Margin="9,0,0,0"><TextBlock Style="{StaticResource LabelStyle}" Text="说明（可选）"/>
+                                <TextBox x:Name="DescriptionBox" Style="{StaticResource EditorFieldStyle}"/></StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="0,14,0,0" Padding="20,18" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitleStyle}" Text="模型来源"/>
+                        <TextBlock Margin="0,5,0,15" FontSize="11" Foreground="{StaticResource MutedTextBrush}"
+                                   Text="二选一：直接引用已有文件，或填写下载地址交给软件安装。"/>
+
+                        <Border Padding="14" Background="#F8F9FC" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10">
+                            <StackPanel><TextBlock FontSize="12" FontWeight="SemiBold" Text="方式 A · 已有 GGUF 文件"/>
+                                <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBox x:Name="PathBox" Style="{StaticResource EditorFieldStyle}"/>
+                                    <Button Grid.Column="1" Margin="8,0,0,0" Padding="17,8" Style="{StaticResource SecondaryButtonStyle}" Content="浏览文件" Click="Browse_Click"/>
+                                </Grid>
+                                <TextBlock Margin="1,7,0,0" FontSize="10" Foreground="{StaticResource MutedTextBrush}" Text="只保存路径；移除配置时不会删除这个文件。"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Border Height="1" VerticalAlignment="Center" Background="{StaticResource BorderBrush}"/>
+                            <TextBlock Grid.Column="1" Margin="12,0" Foreground="#98A2B3" FontSize="10" Text="或者"/>
+                            <Border Grid.Column="2" Height="1" VerticalAlignment="Center" Background="{StaticResource BorderBrush}"/>
+                        </Grid>
+
+                        <Border Margin="0,12,0,0" Padding="14" Background="#F8F9FC" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10">
+                            <StackPanel><TextBlock FontSize="12" FontWeight="SemiBold" Text="方式 B · 自动下载并托管"/>
+                                <TextBlock Margin="0,10,0,6" Style="{StaticResource LabelStyle}" Text="下载 URL"/>
+                                <TextBox x:Name="DownloadUrlBox" Style="{StaticResource EditorFieldStyle}"/>
+                                <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,9,0"><TextBlock Style="{StaticResource LabelStyle}" Text="模型目录内相对路径"/>
+                                        <TextBox x:Name="RelativePathBox" Style="{StaticResource EditorFieldStyle}"/></StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="9,0,0,0"><TextBlock Style="{StaticResource LabelStyle}" Text="预期字节数（0 = 不限制）"/>
+                                        <TextBox x:Name="SizeBox" Style="{StaticResource EditorFieldStyle}"/></StackPanel>
+                                </Grid>
+                                <TextBlock Margin="0,12,0,6" Style="{StaticResource LabelStyle}" Text="SHA-256（可选）"/>
+                                <TextBox x:Name="HashBox" Style="{StaticResource EditorFieldStyle}"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="0,14,0,4" Padding="20,18" Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitleStyle}" Text="推理与翻译约束"/>
+                        <Grid Margin="0,15,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <StackPanel Margin="0,0,9,0"><TextBlock Style="{StaticResource LabelStyle}" Text="上下文长度"/>
+                                <TextBox x:Name="ContextBox" Style="{StaticResource EditorFieldStyle}"/></StackPanel>
+                            <StackPanel Grid.Column="1" Margin="9,0,0,0"><TextBlock Style="{StaticResource LabelStyle}" Text="最大输出 Token"/>
+                                <TextBox x:Name="OutputBox" Style="{StaticResource EditorFieldStyle}"/></StackPanel>
+                        </Grid>
+                        <TextBlock Margin="0,14,0,6" Style="{StaticResource LabelStyle}" Text="系统提示词模板"/>
+                        <TextBox x:Name="PromptBox" Height="145" Padding="12,10" Background="White" BorderBrush="{StaticResource BorderBrush}"
+                                 BorderThickness="1" FontSize="13" AcceptsReturn="True" TextWrapping="Wrap"
+                                 VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"/>
+                        <Border Margin="0,10,0,0" Padding="12,9" Background="#F3F4FF" CornerRadius="8">
+                            <TextBlock FontSize="10" Foreground="#4B4CCB" TextWrapping="Wrap"
+                                       Text="支持 {source} 和 {target} 占位符。建议明确要求：只输出译文，不解释、不总结、不回答原文。"/>
+                        </Border>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" Padding="30,15" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0">
+            <Grid><TextBlock VerticalAlignment="Center" FontSize="11" Foreground="{StaticResource MutedTextBrush}" Text="带 * 的项目为必填项"/>
+                <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                    <Button Padding="18,8" Style="{StaticResource SecondaryButtonStyle}" Content="取消" Click="Cancel_Click"/>
+                    <Button Margin="8,0,0,0" Padding="20,8" Style="{StaticResource PrimaryButtonStyle}" Content="保存模型配置" Click="Save_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

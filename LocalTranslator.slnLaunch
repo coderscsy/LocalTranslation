@@ -1,0 +1,12 @@
+[
+  {
+    "Name": "Local Translator",
+    "Projects": [
+      {
+        "Path": "src\\LocalTranslator.App\\LocalTranslator.App.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]
+

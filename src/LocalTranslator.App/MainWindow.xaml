@@ -1,0 +1,503 @@
+<Window x:Class="LocalTranslator.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Local Translator"
+        Width="1280"
+        Height="820"
+        MinWidth="1040"
+        MinHeight="700"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource WindowBackgroundBrush}"
+        FontFamily="Segoe UI"
+        PreviewKeyDown="Window_PreviewKeyDown">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="{StaticResource SidebarBrush}">
+            <Grid Margin="16,22,16,18">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid Margin="8,0,4,28">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="42" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Width="36"
+                            Height="36"
+                            HorizontalAlignment="Left"
+                            CornerRadius="10">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Offset="0" Color="#7778FF" />
+                                <GradientStop Offset="1" Color="#4E4FC8" />
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <TextBlock HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Foreground="White"
+                                   FontSize="16"
+                                   FontWeight="Bold"
+                                   Text="译" />
+                    </Border>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Foreground="White"
+                                   FontSize="15"
+                                   FontWeight="SemiBold"
+                                   Text="Local Translator" />
+                        <TextBlock Margin="0,2,0,0"
+                                   Foreground="#7F8A9D"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   Text="PRIVATE · OFFLINE" />
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel Grid.Row="1">
+                    <TextBlock Margin="14,0,0,7"
+                               Foreground="#697589"
+                               FontSize="10"
+                               FontWeight="Bold"
+                               Text="工作区" />
+                    <Button Style="{StaticResource NavButtonStyle}" Tag="Selected">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Width="29" FontSize="16" Text="文" />
+                            <TextBlock VerticalAlignment="Center" Text="实时翻译" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource NavButtonStyle}"
+                            Click="ScreenshotTranslate_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Width="29" FontSize="16" Text="▣" />
+                            <TextBlock VerticalAlignment="Center" Text="截图翻译" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource NavButtonStyle}"
+                            Click="History_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Width="29" FontSize="16" Text="↺" />
+                            <TextBlock VerticalAlignment="Center" Text="翻译历史" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource NavButtonStyle}" Click="VideoSubtitle_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Width="29" FontSize="16" Text="▶" />
+                            <TextBlock VerticalAlignment="Center" Text="视频字幕" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <Border Grid.Row="3"
+                        Margin="0,0,0,12"
+                        Padding="13"
+                        Background="#192235"
+                        CornerRadius="10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="8"
+                                     Height="8"
+                                     Margin="0,0,8,0"
+                                     Fill="{StaticResource SuccessBrush}" />
+                            <TextBlock Foreground="White"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       Text="离线 OCR 已就绪" />
+                        </StackPanel>
+                        <TextBlock Grid.Row="1"
+                                   Margin="0,8,0,10"
+                                   Foreground="#8994A8"
+                                   FontSize="11"
+                                   LineHeight="16"
+                                   Text="离线 OCR 已就绪；翻译来源由用户自由配置。"
+                                   TextWrapping="Wrap" />
+                        <Button Grid.Row="2"
+                                Height="30"
+                                Padding="9,0"
+                                HorizontalContentAlignment="Center"
+                                Background="#27324A"
+                                BorderThickness="0"
+                                Foreground="#D8DEEA"
+                                Style="{StaticResource BaseButtonStyle}"
+                                Content="管理本地模型"
+                                Click="ManageModels_Click" />
+                    </Grid>
+                </Border>
+
+                <Button Grid.Row="4"
+                        Style="{StaticResource NavButtonStyle}"
+                        Click="Settings_Click">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Width="29" FontSize="16" Text="⚙" />
+                        <TextBlock VerticalAlignment="Center" Text="设置" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="4" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <ProgressBar Grid.Row="0"
+                         Minimum="0"
+                         Maximum="100"
+                         IsIndeterminate="True"
+                         Foreground="{StaticResource AccentBrush}"
+                         Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+            <ScrollViewer Grid.Row="1"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <Grid Margin="32,24,32,26">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Margin="2,0,2,22">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Foreground="{StaticResource TextBrush}"
+                                       FontSize="25"
+                                       FontWeight="SemiBold"
+                                       Text="实时翻译" />
+                            <TextBlock Margin="0,5,0,0"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="13"
+                                       Text="输入文字后自动翻译，内容不会离开这台电脑" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                            <StackPanel Margin="0,0,12,0" VerticalAlignment="Center">
+                                <TextBlock HorizontalAlignment="Right"
+                                           Foreground="{StaticResource TextBrush}"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           Text="实时翻译" />
+                                <TextBlock HorizontalAlignment="Right"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="10"
+                                           Text="停止输入 650ms 后执行" />
+                            </StackPanel>
+                            <CheckBox IsChecked="{Binding IsRealtimeEnabled}"
+                                      Style="{StaticResource ToggleSwitchStyle}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Border Grid.Row="1"
+                            Margin="0,0,0,16"
+                            Padding="14,11"
+                            Background="#ECFDF3"
+                            BorderBrush="#ABEFC6"
+                            BorderThickness="1"
+                            CornerRadius="10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Border Width="30"
+                                    Height="30"
+                                    Margin="0,0,11,0"
+                                    Background="#D1FADF"
+                                    CornerRadius="15">
+                                <TextBlock HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Foreground="#027A48"
+                                           FontWeight="Bold"
+                                           Text="!" />
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock x:Name="TranslationProviderTitleText"
+                                           Foreground="#05603A"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           Text="当前启用：正在读取翻译模型" />
+                                <TextBlock x:Name="TranslationProviderDetailText"
+                                           Margin="0,2,0,0"
+                                           Foreground="#027A48"
+                                           FontSize="11"
+                                           Text="可使用自己的 GGUF、本地或局域网服务，以及常用在线 Provider。" />
+                            </StackPanel>
+                            <Button Grid.Column="2"
+                                    Padding="12,7"
+                                    Background="White"
+                                    BorderBrush="#ABEFC6"
+                                    Foreground="#05603A"
+                                    Style="{StaticResource BaseButtonStyle}"
+                                    Content="切换翻译模型"
+                                    Click="ManageModels_Click" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="2"
+                            Margin="0,0,0,12"
+                            Padding="14,11"
+                            Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="54" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Margin="2,0,12,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Text="源语言" />
+                                <ComboBox ItemsSource="{Binding SourceLanguages}"
+                                          ItemTemplate="{StaticResource LanguageItemTemplate}"
+                                          SelectedItem="{Binding SourceLanguage}" />
+                            </StackPanel>
+
+                            <Button Grid.Column="1"
+                                    Width="36"
+                                    Height="36"
+                                    HorizontalAlignment="Center"
+                                    Foreground="{StaticResource AccentBrush}"
+                                    FontSize="17"
+                                    Style="{StaticResource IconButtonStyle}"
+                                    Content="↔"
+                                    ToolTip="交换语言（Ctrl+Shift+S）"
+                                    Click="SwapLanguages_Click" />
+
+                            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                <TextBlock Margin="2,0,12,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Text="目标语言" />
+                                <ComboBox ItemsSource="{Binding TargetLanguages}"
+                                          ItemTemplate="{StaticResource LanguageItemTemplate}"
+                                          SelectedItem="{Binding TargetLanguage}" />
+                            </StackPanel>
+
+                            <Button Grid.Column="3"
+                                    Padding="13,8"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Click="ScreenshotTranslate_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Margin="0,0,7,0" FontSize="14" Text="▣" />
+                                    <TextBlock Text="截图翻译" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <Grid Grid.Row="3" Margin="2,0,2,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Text="原文" />
+                        <TextBlock Grid.Column="1"
+                                   Margin="24,0,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Text="译文" />
+                    </Grid>
+
+                    <Border Grid.Row="4"
+                            MinHeight="380"
+                            Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="1" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Grid Grid.Column="0" Margin="20,18,16,14">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <Grid>
+                                    <TextBlock Margin="4,3,20,0"
+                                               VerticalAlignment="Top"
+                                               Foreground="#98A2B3"
+                                               FontSize="18"
+                                               IsHitTestVisible="False"
+                                               Text="输入或粘贴需要翻译的文字…"
+                                               TextWrapping="Wrap">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding SourceText}" Value="">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBox x:Name="SourceTextBox"
+                                             Padding="0"
+                                             Style="{StaticResource TranslatorTextBoxStyle}"
+                                             Text="{Binding SourceText, UpdateSourceTrigger=PropertyChanged}" />
+                                </Grid>
+
+                                <Grid Grid.Row="1" Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Padding="10,6"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Content="清空"
+                                            Click="ClearSource_Click" />
+                                    <Button Grid.Column="1"
+                                            Margin="4,0,0,0"
+                                            Padding="10,6"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Content="粘贴"
+                                            Click="PasteSource_Click" />
+                                    <TextBlock Grid.Column="3"
+                                               Margin="10,0,2,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="11"
+                                               Text="{Binding SourceCharacterCount, StringFormat={}{0:N0} 字符}" />
+                                </Grid>
+                            </Grid>
+
+                            <Border Grid.Column="1" Background="{StaticResource BorderBrush}" />
+
+                            <Grid Grid.Column="2"
+                                  Margin="16,18,20,14"
+                                  Background="{StaticResource SurfaceMutedBrush}">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <Grid Margin="4,0,0,0">
+                                    <StackPanel HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                IsHitTestVisible="False">
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding TranslatedText}" Value="">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <Border Width="46"
+                                                Height="46"
+                                                HorizontalAlignment="Center"
+                                                Background="#EEEFFD"
+                                                CornerRadius="23">
+                                            <TextBlock HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{StaticResource AccentBrush}"
+                                                       FontSize="18"
+                                                       FontWeight="Bold"
+                                                       Text="译" />
+                                        </Border>
+                                        <TextBlock Margin="0,13,0,0"
+                                                   HorizontalAlignment="Center"
+                                                   Foreground="#7B8496"
+                                                   FontSize="13"
+                                                   Text="译文将在这里显示" />
+                                        <TextBlock Margin="0,5,0,0"
+                                                   HorizontalAlignment="Center"
+                                                   Foreground="#A0A8B8"
+                                                   FontSize="11"
+                                                   Text="{Binding RealtimeModeText}" />
+                                    </StackPanel>
+                                    <TextBox Padding="0"
+                                             Background="Transparent"
+                                             Style="{StaticResource TranslatorTextBoxStyle}"
+                                             IsReadOnly="True"
+                                             Text="{Binding TranslatedText, Mode=OneWay}" />
+                                </Grid>
+
+                                <StackPanel Grid.Row="1"
+                                            Margin="0,12,0,0"
+                                            HorizontalAlignment="Right"
+                                            Orientation="Horizontal">
+                                    <Button Style="{StaticResource IconButtonStyle}"
+                                            Content="☆"
+                                            ToolTip="收藏（后续阶段）"
+                                            Click="Favorite_Click" />
+                                    <Button Margin="4,0,0,0"
+                                            Padding="12,7"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Content="复制译文"
+                                            Click="CopyResult_Click" />
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <Grid Grid.Row="5" Margin="2,14,2,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+                            <Ellipse Width="7"
+                                     Height="7"
+                                     Margin="0,0,8,0"
+                                     Fill="{StaticResource WarningBrush}" />
+                            <TextBlock Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="11"
+                                       Text="{Binding StatusMessage}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <TextBlock Margin="0,0,14,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="#98A2B3"
+                                       FontSize="10"
+                                       Text="Ctrl + Enter 手动翻译" />
+                            <Button MinWidth="128"
+                                    Padding="20,10"
+                                    IsEnabled="{Binding CanTranslate}"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Content="立即翻译"
+                                    Click="Translate_Click" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</Window>

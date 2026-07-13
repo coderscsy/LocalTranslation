@@ -1,0 +1,156 @@
+<Window x:Class="LocalTranslator.App.ProviderSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="翻译 Provider 设置"
+        Width="650"
+        Height="590"
+        MinWidth="600"
+        MinHeight="540"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}"
+        FontFamily="Segoe UI"
+        ShowInTaskbar="False">
+    <Window.Resources>
+        <DataTemplate x:Key="ProviderItemTemplate">
+            <TextBlock Text="{Binding DisplayName}" />
+        </DataTemplate>
+        <Style x:Key="SettingsTextBoxStyle" TargetType="TextBox">
+            <Setter Property="Height" Value="40" />
+            <Setter Property="Padding" Value="11,8" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="AcceptsReturn" Value="False" />
+        </Style>
+        <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
+            <Setter Property="Margin" Value="1,0,0,6" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Padding="26,22"
+                Background="White"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,0,1">
+            <StackPanel>
+                <TextBlock Foreground="{StaticResource TextBrush}"
+                           FontSize="21"
+                           FontWeight="SemiBold"
+                           Text="翻译 Provider" />
+                <TextBlock Margin="0,5,0,0"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           FontSize="12"
+                           Text="选择自己的 GGUF、本地或局域网服务，以及常用在线 Provider。" />
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="1"
+                      Padding="26,20"
+                      VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="当前翻译来源" />
+                <ComboBox x:Name="ProviderComboBox"
+                          Height="44"
+                          ItemsSource="{Binding Providers}"
+                          ItemTemplate="{StaticResource ProviderItemTemplate}"
+                          SelectionChanged="ProviderComboBox_SelectionChanged" />
+
+                <Border Margin="0,16,0,0"
+                        Padding="18,16"
+                        Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock x:Name="ProviderDescriptionText"
+                                   Foreground="{StaticResource TextBrush}"
+                                   FontSize="13"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Margin="0,5,0,15"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="11"
+                                   Text="OpenAI-compatible Provider 共用同一套翻译协议。" />
+
+                        <TextBlock Style="{StaticResource FieldLabelStyle}" Text="API Base URL" />
+                        <TextBox x:Name="BaseUrlTextBox"
+                                 Style="{StaticResource SettingsTextBoxStyle}" />
+
+                        <TextBlock Margin="1,14,0,6"
+                                   Style="{StaticResource FieldLabelStyle}"
+                                   Text="模型名称（测试连接后自动加载）" />
+                        <ComboBox x:Name="ModelTextBox"
+                                  Height="40"
+                                  IsEditable="True"
+                                  ItemsSource="{Binding AvailableModels}"
+                                  SelectionChanged="ModelTextBox_SelectionChanged" />
+
+                        <TextBlock Margin="1,14,0,6"
+                                   Style="{StaticResource FieldLabelStyle}"
+                                   Text="API Key（可选，本地 / 局域网服务可留空）" />
+                        <PasswordBox x:Name="ApiKeyPasswordBox"
+                                     Height="40"
+                                     Padding="11,8"
+                                     Background="White"
+                                     BorderBrush="{StaticResource BorderBrush}"
+                                     BorderThickness="1"
+                                     FontSize="12"
+                                     VerticalContentAlignment="Center" />
+
+                        <TextBlock Margin="1,9,0,0"
+                                   Foreground="#667085"
+                                   FontSize="10"
+                                   Text="无鉴权服务可留空；填写后使用 Windows DPAPI 按当前用户加密，不写入项目配置或日志。"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Margin="0,14,0,0"
+                        Padding="13,10"
+                        Background="#F8F9FC"
+                        BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="9">
+                    <Grid>
+                        <TextBlock x:Name="ConnectionStatusText"
+                                   VerticalAlignment="Center"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="11"
+                                   Text="尚未测试连接" />
+                        <Button x:Name="TestConnectionButton"
+                                Padding="12,7"
+                                HorizontalAlignment="Right"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Content="测试连接"
+                                Click="TestConnection_Click" />
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2"
+                Padding="26,15"
+                Background="White"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,1,0,0">
+            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                <Button Padding="17,8"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Content="取消"
+                        Click="Cancel_Click" />
+                <Button Margin="8,0,0,0"
+                        Padding="18,8"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        Content="保存并使用"
+                        Click="Save_Click" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
