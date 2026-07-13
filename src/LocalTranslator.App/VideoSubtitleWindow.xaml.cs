@@ -47,6 +47,8 @@ public partial class VideoSubtitleWindow : Window
     private readonly object _asrServerOutputLock = new();
     private bool _asrDependenciesInstalled;
     private bool _checkingAsrDependencies;
+    private string ManagedAsrEnvironmentRoot => Path.Combine(_dataRoot, "Runtime", "Python");
+    private string ManagedAsrPythonPath => Path.Combine(ManagedAsrEnvironmentRoot, "Scripts", "python.exe");
 
     public VideoSubtitleWindow(
         SecureTranslationProviderStore providerStore,
@@ -266,13 +268,24 @@ public partial class VideoSubtitleWindow : Window
         SetAsrStatus("正在安装 ASR 依赖，窗口可以继续查看，但请不要关闭软件。");
         try
         {
-            var python = await FindSupportedPythonCommandAsync();
+            var bootstrapPython = await FindSupportedPythonCommandAsync();
             var progress = new Progress<string>(line =>
             {
                 var summary = FormatInstallationProgress(line);
                 if (!string.IsNullOrWhiteSpace(summary))
                     AsrDependencyProgressText.Text = summary;
             });
+            if (!File.Exists(ManagedAsrPythonPath))
+            {
+                AsrDependencyProgressText.Text = $"正在 G 盘创建应用专用 Python 环境：{ManagedAsrEnvironmentRoot}";
+                Directory.CreateDirectory(Path.GetDirectoryName(ManagedAsrEnvironmentRoot)!);
+                await RunCommandWithProgressAsync(
+                    $"{bootstrapPython} -m venv \"{ManagedAsrEnvironmentRoot}\"",
+                    TimeSpan.FromMinutes(5),
+                    progress);
+            }
+
+            var python = QuoteCommandPath(ManagedAsrPythonPath);
             await RunCommandWithProgressAsync(
                 $"{python} -m pip install -U pip setuptools wheel && " +
                 $"{python} -m pip install torch torchaudio funasr fastapi uvicorn python-multipart",
@@ -341,9 +354,11 @@ public partial class VideoSubtitleWindow : Window
         }
     }
 
-    private static async Task<AsrDependencyCheckResult> CheckAsrDependenciesAsync()
+    private async Task<AsrDependencyCheckResult> CheckAsrDependenciesAsync()
     {
-        var python = await FindSupportedPythonCommandAsync();
+        if (!File.Exists(ManagedAsrPythonPath))
+            return new AsrDependencyCheckResult(ManagedAsrPythonPath, ["应用专用 ASR 运行环境"]);
+        var python = QuoteCommandPath(ManagedAsrPythonPath);
         var missing = (await RunCommandToExitAsync(
             $"{python} -c \"import importlib.util as u; names=('funasr','fastapi','uvicorn','multipart','torch','torchaudio'); print(','.join(n for n in names if u.find_spec(n) is None))\"",
             TimeSpan.FromSeconds(20))).Trim();
@@ -511,13 +526,15 @@ public partial class VideoSubtitleWindow : Window
         }
     }
 
-    private static async Task<string> NormalizeAsrStartCommandAsync(string command)
+    private async Task<string> NormalizeAsrStartCommandAsync(string command)
     {
         command = string.IsNullOrWhiteSpace(command) ? DefaultAsrStartCommand : command.Trim();
         if (command.StartsWith("funasr-server", StringComparison.OrdinalIgnoreCase) ||
             command.StartsWith("python ", StringComparison.OrdinalIgnoreCase))
         {
-            var python = await FindSupportedPythonCommandAsync();
+            var python = File.Exists(ManagedAsrPythonPath)
+                ? QuoteCommandPath(ManagedAsrPythonPath)
+                : await FindSupportedPythonCommandAsync();
             if (command.StartsWith("funasr-server", StringComparison.OrdinalIgnoreCase))
             {
                 var arguments = command["funasr-server".Length..].Trim();
