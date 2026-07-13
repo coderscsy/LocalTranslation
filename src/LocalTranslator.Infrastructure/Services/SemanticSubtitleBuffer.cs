@@ -23,8 +23,7 @@ public static class SemanticSubtitleBuffer
     {
         var normalized = Normalize(text);
         if (string.IsNullOrWhiteSpace(normalized)) return false;
-        return EndsSentence(normalized) && !LooksLikeContinuationFragment(normalized) ||
-               duration >= TimeSpan.FromSeconds(4.2) ||
+        return duration >= TimeSpan.FromSeconds(4.2) ||
                normalized.Length >= 180;
     }
 

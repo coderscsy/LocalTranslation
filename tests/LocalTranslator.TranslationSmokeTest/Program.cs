@@ -119,11 +119,34 @@ var expectedFinanceSentence =
     "Following my completion of undergraduate studies, I am driven by a strong passion to pursue further academic accomplishments in the field of finance.";
 if (mergedFinanceSentence != expectedFinanceSentence ||
     SemanticSubtitleBuffer.ShouldFlush("in the field.", TimeSpan.FromSeconds(1)) ||
+    SemanticSubtitleBuffer.ShouldFlush(
+        "Following my completion of undergraduate studies, I am driven by a strong passion to pursue further academic accomplishments in the field of finance.",
+        TimeSpan.FromSeconds(3)) ||
     !SemanticSubtitleBuffer.ShouldFlush(
         "Following my completion of undergraduate studies, I am driven by a strong passion to pursue further academic accomplishments in the field of finance.",
-        TimeSpan.FromSeconds(3)))
+        TimeSpan.FromSeconds(4.3)))
 {
     throw new InvalidOperationException("Semantic subtitle buffering smoke test failed.");
+}
+
+var brokenFinanceFragments = new[]
+{
+    "Following my completion",
+    "of undergraduate studies.",
+    "I am driven by a",
+    "Strong passion.",
+    "to pursue further",
+    "in the field.",
+    "of finance."
+};
+var mergedBrokenFinanceSentence = SemanticSubtitleBuffer.MergeFragments(
+    brokenFinanceFragments,
+    SupportedLanguage.English);
+if (SemanticSubtitleBuffer.ShouldFlush("Following my completion of undergraduate studies.", TimeSpan.FromSeconds(1.4)) ||
+    SemanticSubtitleBuffer.ShouldFlush("Strong passion.", TimeSpan.FromSeconds(1)) ||
+    mergedBrokenFinanceSentence.Contains("field. of", StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException("Broken ASR subtitle fragment buffering smoke test failed.");
 }
 
 var translationWindow = new TranslationWindowManager();

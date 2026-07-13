@@ -161,6 +161,7 @@ public partial class SubtitleOverlayWindow : Window
             ApplyLineStyle(line, false);
         }
         UpdateTaskbarTitle(partialTranslation);
+        ScrollToLatestSubtitle();
     }
 
     public void ShowSegment(SubtitleSegment segment, bool bilingual)
@@ -170,6 +171,7 @@ public partial class SubtitleOverlayWindow : Window
             : segment.TranslatedText.Trim();
         AppendOrUpdateTranslation(segment.SourceText, translation, bilingual);
         UpdateTaskbarTitle(translation);
+        ScrollToLatestSubtitle();
     }
 
     private void AppendOrUpdateSource(string sourceText, bool bilingual)
@@ -190,6 +192,7 @@ public partial class SubtitleOverlayWindow : Window
         line.IsPending = true;
         ApplyLineStyle(line, true);
         TrimSubtitleLines();
+        ScrollToLatestSubtitle();
     }
 
     private void AppendOrUpdateTranslation(string sourceText, string translation, bool bilingual)
@@ -213,6 +216,7 @@ public partial class SubtitleOverlayWindow : Window
         line.IsPending = false;
         ApplyLineStyle(line, false);
         TrimSubtitleLines();
+        ScrollToLatestSubtitle();
     }
 
     private void TrimSubtitleLines()
@@ -480,6 +484,7 @@ public partial class SubtitleOverlayWindow : Window
         ClampToWorkArea();
         RefreshToolbarText();
         TrimSubtitleLines();
+        ScrollToLatestSubtitle();
         RaisePlacementChanged();
     }
 
@@ -553,6 +558,9 @@ public partial class SubtitleOverlayWindow : Window
         InteractionHint.Opacity = 0;
         ResizeThumb.Opacity = 0;
     }
+
+    private void ScrollToLatestSubtitle() =>
+        Dispatcher.BeginInvoke(() => SubtitleScrollViewer.ScrollToEnd());
 
     private void ApplyClickThrough()
     {
