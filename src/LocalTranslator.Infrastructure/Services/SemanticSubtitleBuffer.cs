@@ -13,8 +13,8 @@ public static class SemanticSubtitleBuffer
 
     private static readonly string[] WeakEnglishEndings =
     [
-        "completion", "studies", "passion", "field", "pursue further",
-        "driven by", "strong", "academic", "undergraduate", "following my"
+        "completion", "studies", "passion", "field", "accomplishment", "accomplishments",
+        "pursue further", "driven by", "strong", "academic", "undergraduate", "following my"
     ];
 
     public static string MergeFragments(IEnumerable<string> fragments, SupportedLanguage language)
@@ -30,8 +30,10 @@ public static class SemanticSubtitleBuffer
         var normalized = Normalize(text);
         if (string.IsNullOrWhiteSpace(normalized)) return false;
 
-        return duration >= TimeSpan.FromSeconds(4.2) ||
-               normalized.Length >= 180;
+        // A normal spoken sentence can easily last 6-10 seconds. The old 4.2 second
+        // hard limit split one sentence into several independently translated rows.
+        return duration >= TimeSpan.FromSeconds(12) ||
+               normalized.Length >= 300;
     }
 
     public static bool ShouldFlushOnSpeechBoundary(string text, TimeSpan duration)
@@ -45,7 +47,11 @@ public static class SemanticSubtitleBuffer
         var wordCount = CountWords(normalized);
         if (wordCount <= 2) return false;
 
-        return duration >= TimeSpan.FromSeconds(1.2) && wordCount >= 3;
+        // Short ASR chunks are provisional even when the recognizer inserts a period.
+        // Only a complete-looking clause, or a sufficiently long unpunctuated phrase,
+        // may close the utterance at a detected speech boundary.
+        return duration >= TimeSpan.FromSeconds(1.2) &&
+               (EndsSentence(normalized) || duration >= TimeSpan.FromSeconds(3.2));
     }
 
     public static string JoinFragments(string existing, string next, SupportedLanguage language)

@@ -144,10 +144,10 @@ public partial class SubtitleOverlayWindow : Window
         if (IsInitialized) RefreshToolbarText();
     }
 
-    public void ShowSource(string sourceText, bool bilingual)
+    public void ShowSource(SubtitleSegment segment, bool bilingual)
     {
-        AppendOrUpdateSource(sourceText, bilingual);
-        UpdateTaskbarTitle(sourceText);
+        AppendOrUpdateSource(segment, bilingual);
+        UpdateTaskbarTitle(segment.SourceText);
     }
 
     public void UpdateTranslationStream(string partialTranslation)
@@ -170,26 +170,33 @@ public partial class SubtitleOverlayWindow : Window
         var translation = string.IsNullOrWhiteSpace(segment.TranslatedText)
             ? "正在翻译…"
             : segment.TranslatedText.Trim();
-        AppendOrUpdateTranslation(segment.SourceText, translation, bilingual);
+        AppendOrUpdateTranslation(segment, translation, bilingual);
         UpdateTaskbarTitle(translation);
         ScrollToLatestSubtitle();
     }
 
-    private void AppendOrUpdateSource(string sourceText, bool bilingual)
+    private void AppendOrUpdateSource(SubtitleSegment segment, bool bilingual)
     {
+        var sourceText = segment.SourceText;
         var normalizedSource = NormalizeText(sourceText);
-        var line = _subtitleLines.LastOrDefault(item =>
-            NormalizeText(item.RawSourceText).Equals(normalizedSource, StringComparison.OrdinalIgnoreCase));
+        var line = segment.Sequence > 0
+            ? _subtitleLines.LastOrDefault(item => item.Sequence == segment.Sequence)
+            : _subtitleLines.LastOrDefault(item =>
+                NormalizeText(item.RawSourceText).Equals(normalizedSource, StringComparison.OrdinalIgnoreCase));
+        var isNewLine = line is null;
         if (line is null)
         {
-            line = new OverlaySubtitleLine();
+            line = new OverlaySubtitleLine { Sequence = segment.Sequence };
             _subtitleLines.Add(line);
         }
 
         line.RawSourceText = sourceText;
         line.SourceText = bilingual && _showSourceText ? sourceText : string.Empty;
         line.SourceVisibility = bilingual && _showSourceText ? Visibility.Visible : Visibility.Collapsed;
-        line.TranslationText = "正在翻译…";
+        // Keep the latest stable preview while the same ASR sentence grows. Clearing it
+        // on every partial result caused a screen full of duplicated "正在翻译…" rows.
+        if (isNewLine || string.IsNullOrWhiteSpace(line.TranslationText))
+            line.TranslationText = "正在翻译…";
         line.IsPending = true;
         ApplyLineStyle(line, true);
         TrimSubtitleLines();
@@ -197,15 +204,18 @@ public partial class SubtitleOverlayWindow : Window
         ScrollToLatestSubtitle();
     }
 
-    private void AppendOrUpdateTranslation(string sourceText, string translation, bool bilingual)
+    private void AppendOrUpdateTranslation(SubtitleSegment segment, string translation, bool bilingual)
     {
+        var sourceText = segment.SourceText;
         var normalizedSource = NormalizeText(sourceText);
-        var line = _subtitleLines.LastOrDefault(item =>
-                       NormalizeText(item.RawSourceText).Equals(normalizedSource, StringComparison.OrdinalIgnoreCase))
-                   ?? _subtitleLines.LastOrDefault(item => item.IsPending);
+        var line = segment.Sequence > 0
+            ? _subtitleLines.LastOrDefault(item => item.Sequence == segment.Sequence)
+            : _subtitleLines.LastOrDefault(item =>
+                  NormalizeText(item.RawSourceText).Equals(normalizedSource, StringComparison.OrdinalIgnoreCase))
+              ?? _subtitleLines.LastOrDefault(item => item.IsPending);
         if (line is null)
         {
-            line = new OverlaySubtitleLine();
+            line = new OverlaySubtitleLine { Sequence = segment.Sequence };
             _subtitleLines.Add(line);
         }
 
@@ -700,6 +710,7 @@ public sealed class OverlaySubtitleLine : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public bool IsPending { get; set; }
+    public long Sequence { get; init; }
 
     public string RawSourceText
     {

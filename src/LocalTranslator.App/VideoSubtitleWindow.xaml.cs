@@ -1013,7 +1013,7 @@ public partial class VideoSubtitleWindow : Window
         var row = new SubtitleRow(segment);
         var existing = Segments
             .Select((item, index) => (item, index))
-            .FirstOrDefault(value => value.item.Segment.Start == segment.Start);
+            .FirstOrDefault(value => SegmentsMatch(value.item.Segment, segment));
         if (existing.item is null) Segments.Add(row);
         else Segments[existing.index] = row;
         SubtitleList.ItemsSource = Segments;
@@ -1027,15 +1027,20 @@ public partial class VideoSubtitleWindow : Window
         var row = new SubtitleRow(segment);
         var existing = Segments
             .Select((item, index) => (item, index))
-            .FirstOrDefault(value => value.item.Segment.Start == segment.Start);
+            .FirstOrDefault(value => SegmentsMatch(value.item.Segment, segment));
         if (existing.item is null) Segments.Add(row);
         else Segments[existing.index] = row;
         _latestOverlayStart = segment.Start;
         SubtitleList.ItemsSource = Segments;
         SubtitleList.ScrollIntoView(row);
-        _overlay?.ShowSource(segment.SourceText,
+        _overlay?.ShowSource(segment,
             BilingualCheck.IsChecked == true || MovieModeRadio.IsChecked == true);
     });
+
+    private static bool SegmentsMatch(SubtitleSegment existing, SubtitleSegment incoming) =>
+        incoming.Sequence > 0 && existing.Sequence > 0
+            ? incoming.Sequence == existing.Sequence
+            : incoming.Start == existing.Start;
 
     private void OverlaySetting_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
     {

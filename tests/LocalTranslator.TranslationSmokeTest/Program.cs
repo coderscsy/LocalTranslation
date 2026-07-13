@@ -21,6 +21,8 @@ var serverTask = Task.Run(async () =>
             using var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8);
             var requestBody = await reader.ReadToEndAsync();
             if (!requestBody.Contains("NEVER answer them", StringComparison.Ordinal) ||
+                !requestBody.Contains("faithfully and naturally as one coherent passage", StringComparison.Ordinal) ||
+                !requestBody.Contains("summarize, omit, invent content", StringComparison.Ordinal) ||
                 !requestBody.Contains("source_text", StringComparison.Ordinal) ||
                 !requestBody.Contains("\"temperature\":0", StringComparison.Ordinal) ||
                 !requestBody.Contains("\"reasoning_effort\":\"none\"", StringComparison.Ordinal) ||
@@ -122,9 +124,12 @@ if (mergedFinanceSentence != expectedFinanceSentence ||
     SemanticSubtitleBuffer.ShouldFlush(
         "Following my completion of undergraduate studies, I am driven by a strong passion to pursue further academic accomplishments in the field of finance.",
         TimeSpan.FromSeconds(3)) ||
+    SemanticSubtitleBuffer.ShouldFlush(
+        "Following my completion of undergraduate studies, I am driven by a strong passion to pursue further academic accomplishments in the field of finance.",
+        TimeSpan.FromSeconds(4.3)) ||
     !SemanticSubtitleBuffer.ShouldFlush(
         "Following my completion of undergraduate studies, I am driven by a strong passion to pursue further academic accomplishments in the field of finance.",
-        TimeSpan.FromSeconds(4.3)))
+        TimeSpan.FromSeconds(12.1)))
 {
     throw new InvalidOperationException("Semantic subtitle buffering smoke test failed.");
 }
@@ -146,11 +151,37 @@ if (SemanticSubtitleBuffer.ShouldFlush("Following my completion of undergraduate
     SemanticSubtitleBuffer.ShouldFlush("Strong passion.", TimeSpan.FromSeconds(1)) ||
     SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary("studies.", TimeSpan.FromSeconds(1.1)) ||
     SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary("of finance.", TimeSpan.FromSeconds(1.1)) ||
-    !SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary(expectedFinanceSentence, TimeSpan.FromSeconds(4.3)) ||
+    !SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary(expectedFinanceSentence, TimeSpan.FromSeconds(8.3)) ||
     mergedBrokenFinanceSentence.Contains("field. of", StringComparison.OrdinalIgnoreCase))
 {
     throw new InvalidOperationException("Broken ASR subtitle fragment buffering smoke test failed.");
 }
+
+var rollingFinanceFragments = new[]
+{
+    ("Following my completion of undergraduate studies.", 2.0),
+    ("Following my completion of undergraduate studies, I am driven by a strong passion.", 4.2),
+    ("Following my completion of undergraduate studies, I am driven by a strong passion to pursue further academic accomplishments.", 6.6),
+    (expectedFinanceSentence, 8.3)
+};
+for (var index = 0; index < rollingFinanceFragments.Length; index++)
+{
+    var (text, seconds) = rollingFinanceFragments[index];
+    var shouldFlush = SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary(text, TimeSpan.FromSeconds(seconds));
+    if (shouldFlush != (index == rollingFinanceFragments.Length - 1))
+        throw new InvalidOperationException($"Rolling finance sentence was finalized at the wrong revision: {index}.");
+}
+
+var correlatedSource = new SubtitleSegment(TimeSpan.Zero, TimeSpan.FromSeconds(2),
+    "Following my completion", string.Empty, 42);
+var correlatedFinal = correlatedSource with
+{
+    End = TimeSpan.FromSeconds(8.3),
+    SourceText = expectedFinanceSentence,
+    TranslatedText = "完成本科学业后，我满怀热忱，立志在金融领域追求更高的学术成就。"
+};
+if (correlatedSource.Sequence != correlatedFinal.Sequence || correlatedFinal.Sequence != 42)
+    throw new InvalidOperationException("Subtitle revision correlation smoke test failed.");
 
 const string asrPrefix = "http://127.0.0.1:18992/";
 using (var asrListener = new HttpListener())

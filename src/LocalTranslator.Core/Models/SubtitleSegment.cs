@@ -6,4 +6,5 @@ public sealed record SubtitleSegment(
     TimeSpan Start,
     TimeSpan End,
     string SourceText,
-    string TranslatedText);
+    string TranslatedText,
+    long Sequence = 0);

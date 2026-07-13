@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
@@ -44,7 +45,9 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     private SpeechRecognitionEngine _recognitionEngine = SpeechRecognitionEngine.WhisperGgml;
     private Uri? _senseVoiceEndpoint;
     private string _senseVoiceModel = "sensevoice";
-    private long _recognizedVersion;
+    private long _utteranceSequence;
+    private long _translationRevision;
+    private readonly ConcurrentDictionary<long, long> _latestTranslationRevisions = new();
     private PendingUtterance? _pendingUtterance;
     private readonly TranslationWindowManager _translationWindow = new();
 
@@ -58,6 +61,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     public void SetTargetLanguage(SupportedLanguage target)
     {
         _target = target;
+        _latestTranslationRevisions.Clear();
         _translationWindow.Reset();
         StatusChanged?.Invoke(this, $"后续字幕目标语言已切换为：{target.ToDisplayName()}。");
     }
@@ -107,7 +111,9 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         translationConcurrency = Math.Clamp(translationConcurrency, 1, 4);
         _translations = CreateTranslationChannel(translationConcurrency * 2);
         _nextChunkStart = TimeSpan.Zero;
-        _recognizedVersion = 0;
+        _utteranceSequence = 0;
+        _translationRevision = 0;
+        _latestTranslationRevisions.Clear();
         _pendingUtterance = null;
         _translationWindow.Reset();
         _factory = _recognitionEngine == SpeechRecognitionEngine.WhisperGgml
@@ -499,6 +505,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         {
             _pendingUtterance = new PendingUtterance
             {
+                Sequence = Interlocked.Increment(ref _utteranceSequence),
                 Start = start,
                 End = end,
                 SourceText = SemanticSubtitleBuffer.Normalize(sourceText),
@@ -520,7 +527,10 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             _pendingUtterance.Start,
             _pendingUtterance.End,
             _pendingUtterance.DisplayedSource,
-            string.Empty));
+            string.Empty,
+            _pendingUtterance.Sequence));
+
+        QueuePreviewTranslation(_pendingUtterance);
 
         if (ShouldFlushPending(_pendingUtterance))
             FlushPendingUtterance();
@@ -536,10 +546,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         var displayedSource = pending.DisplayedSource.Trim();
         if (string.IsNullOrWhiteSpace(sourceText)) return;
 
-        var version = Interlocked.Increment(ref _recognizedVersion);
         _translationWindow.UpdateStream(sourceText);
-        SourceSegmentReady?.Invoke(this, new SubtitleSegment(
-            pending.Start, pending.End, displayedSource, string.Empty));
 
         if (pending.SourceLanguage == _target)
         {
@@ -547,19 +554,12 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                 pending.Start,
                 pending.End,
                 displayedSource,
-                NormalizeForTarget(sourceText, _target)));
+                NormalizeForTarget(sourceText, _target),
+                pending.Sequence));
         }
         else
         {
-            var context = _translationWindow.HistoricalContext;
-            _translations.Writer.TryWrite(new RecognizedSegment(
-                version,
-                pending.Start,
-                pending.End,
-                sourceText,
-                displayedSource,
-                pending.SourceLanguage,
-                context));
+            QueueTranslation(pending, true);
         }
 
         _translationWindow.FinalizeSentence(sourceText);
@@ -581,12 +581,57 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     private static bool ShouldFlushPending(PendingUtterance pending) =>
         SemanticSubtitleBuffer.ShouldFlush(pending.SourceText, pending.End - pending.Start);
 
+    private void QueuePreviewTranslation(PendingUtterance pending)
+    {
+        if (pending.SourceLanguage == _target ||
+            !ShouldRequestPreviewTranslation(pending.SourceText, pending.LastQueuedSource))
+            return;
+
+        QueueTranslation(pending, false);
+    }
+
+    private void QueueTranslation(PendingUtterance pending, bool isFinal)
+    {
+        var sourceText = pending.SourceText.Trim();
+        if (string.IsNullOrWhiteSpace(sourceText)) return;
+        if (!isFinal && sourceText.Equals(pending.LastQueuedSource, StringComparison.Ordinal)) return;
+
+        var revision = Interlocked.Increment(ref _translationRevision);
+        _latestTranslationRevisions[pending.Sequence] = revision;
+        pending.LastQueuedSource = sourceText;
+        _translations.Writer.TryWrite(new RecognizedSegment(
+            pending.Sequence,
+            revision,
+            isFinal,
+            pending.Start,
+            pending.End,
+            sourceText,
+            pending.DisplayedSource,
+            pending.SourceLanguage,
+            _translationWindow.HistoricalContext));
+    }
+
+    private static bool ShouldRequestPreviewTranslation(string sourceText, string lastQueuedSource)
+    {
+        var normalized = SemanticSubtitleBuffer.Normalize(sourceText);
+        if (normalized.Length < 18) return false;
+        if (normalized.Length - lastQueuedSource.Length < 12) return false;
+
+        var language = TextLanguageDetector.Detect(normalized);
+        return language is SupportedLanguage.ChineseSimplified or SupportedLanguage.Japanese ||
+               normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length >= 5;
+    }
+
     private async Task ProcessTranslationsAsync(int workerId, CancellationToken cancellationToken)
     {
         await foreach (var item in _translations.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
             try
             {
+                if (!_latestTranslationRevisions.TryGetValue(item.Sequence, out var latestRevision) ||
+                    latestRevision != item.Revision)
+                    continue;
+
                 var request = new TranslationRequest(
                     item.SourceText,
                     item.SourceLanguage,
@@ -608,10 +653,22 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                 translated = NormalizeForTarget(translated, _target);
                 if (!TranslationOutputValidator.IsValid(item.SourceText, translated, _target))
                     throw new OfflineEngineException("翻译模型连续返回了原文或错误语言，本句已阻止上屏。");
+
+                if (!_latestTranslationRevisions.TryGetValue(item.Sequence, out latestRevision) ||
+                    latestRevision != item.Revision)
+                {
+                    logger.Info(
+                        $"Stale video translation ignored. Worker={workerId}, Sequence={item.Sequence}, Revision={item.Revision}.");
+                    continue;
+                }
+
                 SegmentReady?.Invoke(this, new SubtitleSegment(
-                    item.Start, item.End, item.DisplayedSource, translated));
+                    item.Start, item.End, item.DisplayedSource, translated, item.Sequence));
+                if (item.IsFinal)
+                    _latestTranslationRevisions.TryRemove(item.Sequence, out _);
                 logger.Info(
-                    $"Video translation ready. Worker={workerId}, Start={item.Start}, SourceChars={item.SourceText.Length}.");
+                    $"Video translation ready. Worker={workerId}, Sequence={item.Sequence}, " +
+                    $"Revision={item.Revision}, Final={item.IsFinal}, SourceChars={item.SourceText.Length}.");
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -698,15 +755,19 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     private sealed record AudioChunk(byte[] Pcm, TimeSpan Start, TimeSpan Duration, bool IsSpeechBoundary);
     private sealed class PendingUtterance
     {
+        public long Sequence { get; init; }
         public TimeSpan Start { get; init; }
         public TimeSpan End { get; set; }
         public required string SourceText { get; set; }
         public required string DisplayedSource { get; set; }
         public required SupportedLanguage SourceLanguage { get; init; }
+        public string LastQueuedSource { get; set; } = string.Empty;
     }
 
     private sealed record RecognizedSegment(
-        long Version,
+        long Sequence,
+        long Revision,
+        bool IsFinal,
         TimeSpan Start,
         TimeSpan End,
         string SourceText,
