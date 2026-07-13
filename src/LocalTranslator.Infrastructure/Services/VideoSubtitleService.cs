@@ -19,8 +19,9 @@ namespace LocalTranslator.Infrastructure.Services;
 public sealed class VideoSubtitleService(ITranslationService translationService, IAppLogger logger) : IAsyncDisposable
 {
     private const double ParakeetMinimumChunkSeconds = 1.8;
-    private const double ParakeetMaximumChunkSeconds = 4.8;
-    private const double ParakeetTailSilenceSeconds = 0.45;
+    private const double ParakeetPreviewIntervalSeconds = 1.35;
+    private const double ParakeetMaximumChunkSeconds = 12;
+    private const double ParakeetTailSilenceSeconds = 0.70;
     private const double ParakeetOverlapSeconds = 0.85;
     private const double SenseVoiceMinimumChunkSeconds = 1.8;
     private const double SenseVoiceMaximumChunkSeconds = 4.8;
@@ -48,6 +49,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     private MeetilyParakeetRecognizer? _parakeet;
     private readonly HttpClient _asrHttpClient = new() { Timeout = TimeSpan.FromSeconds(90) };
     private double _resampleByteRemainder;
+    private int _parakeetLastSnapshotBytes;
     private TimeSpan _nextChunkStart;
     private SupportedLanguage _source;
     private SupportedLanguage _target;
@@ -110,6 +112,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         translationConcurrency = Math.Clamp(translationConcurrency, 1, 4);
         _translations = CreateTranslationChannel(translationConcurrency * 2);
         _nextChunkStart = TimeSpan.Zero;
+        _parakeetLastSnapshotBytes = 0;
         _utteranceSequence = 0;
         _translationRevision = 0;
         _latestTranslationRevisions.Clear();
@@ -187,6 +190,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         _captureBuffer = null;
         _whisperWaveProvider = null;
         _resampleByteRemainder = 0;
+        _parakeetLastSnapshotBytes = 0;
         _factory?.Dispose();
         _factory = null;
         _parakeet?.Dispose();
@@ -237,6 +241,12 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         lock (_bufferLock)
         {
             _pcmBuffer.AddRange(converted.AsSpan(0, bytesRead).ToArray());
+            if (_recognitionEngine == SpeechRecognitionEngine.MeetilyParakeet)
+            {
+                CaptureParakeetSnapshotLocked();
+                return;
+            }
+
             var bufferedBytes = _pcmBuffer.Count;
             var maxBytes = WhisperWaveFormat.AverageBytesPerSecond * CurrentMaximumChunkSeconds;
             var minBytes = WhisperWaveFormat.AverageBytesPerSecond * CurrentMinimumChunkSeconds;
@@ -246,6 +256,39 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                 FlushChunkLocked(hasTailSilence);
             }
         }
+    }
+
+    private void CaptureParakeetSnapshotLocked()
+    {
+        var bufferedBytes = _pcmBuffer.Count;
+        var minimumBytes = (int)(WhisperWaveFormat.AverageBytesPerSecond * ParakeetMinimumChunkSeconds) & ~1;
+        if (bufferedBytes < minimumBytes) return;
+
+        var previewIntervalBytes =
+            (int)(WhisperWaveFormat.AverageBytesPerSecond * ParakeetPreviewIntervalSeconds) & ~1;
+        var maximumBytes = (int)(WhisperWaveFormat.AverageBytesPerSecond * ParakeetMaximumChunkSeconds) & ~1;
+        var hasTailSilence = IsTailSilent(_pcmBuffer, ParakeetTailSilenceSeconds);
+        var isFinalSnapshot = hasTailSilence || bufferedBytes >= maximumBytes;
+        var hasEnoughNewAudio = bufferedBytes - _parakeetLastSnapshotBytes >= previewIntervalBytes;
+        if (!isFinalSnapshot && !hasEnoughNewAudio) return;
+
+        var pcm = _pcmBuffer.ToArray();
+        var duration = TimeSpan.FromSeconds((double)pcm.Length / WhisperWaveFormat.AverageBytesPerSecond);
+        if (!IsSilent(pcm) && !_chunks.Writer.TryWrite(new AudioChunk(
+                pcm, _nextChunkStart, duration, isFinalSnapshot, IsCumulative: true)))
+        {
+            logger.Info("ASR audio queue reached its safety limit; the newest Parakeet revision could not be queued.");
+        }
+
+        _parakeetLastSnapshotBytes = bufferedBytes;
+        if (!isFinalSnapshot) return;
+
+        // A Parakeet revision always contains the complete audio since the last real
+        // speech boundary. Clearing only after the final snapshot lets a later pass
+        // repair words guessed incorrectly by an early 1.8-second preview.
+        _pcmBuffer.Clear();
+        _nextChunkStart += duration;
+        _parakeetLastSnapshotBytes = 0;
     }
 
     private void ConfigureResampler(WaveFormat deviceFormat)
@@ -336,7 +379,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                         ? ChineseTextNormalizer.ToSimplified(sourceText)
                         : sourceText;
                     AppendRecognizedText(sourceText, displayedSource, resolvedSource,
-                        chunk.Start, chunk.Start + chunk.Duration);
+                        chunk.Start, chunk.Start + chunk.Duration, replacePendingText: chunk.IsCumulative);
                     logger.Info($"Meetily Parakeet speech recognized. Start={chunk.Start}, SourceChars={sourceText.Length}.");
                 }
 
@@ -547,7 +590,8 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         string displayedSource,
         SupportedLanguage sourceLanguage,
         TimeSpan start,
-        TimeSpan end)
+        TimeSpan end,
+        bool replacePendingText = false)
     {
         if (_pendingUtterance is not null)
         {
@@ -565,19 +609,40 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                 End = end,
                 SourceText = SemanticSubtitleBuffer.Normalize(sourceText),
                 DisplayedSource = SemanticSubtitleBuffer.Normalize(displayedSource),
-                SourceLanguage = sourceLanguage
+                SourceLanguage = sourceLanguage,
+                CumulativeRevisionStart = replacePendingText ? start : null
             };
         }
         else
         {
             _pendingUtterance.End = end > _pendingUtterance.End ? end : _pendingUtterance.End;
-            _pendingUtterance.SourceText = SemanticSubtitleBuffer.JoinFragments(
-                _pendingUtterance.SourceText, sourceText, sourceLanguage);
-            _pendingUtterance.DisplayedSource = SemanticSubtitleBuffer.JoinFragments(
-                _pendingUtterance.DisplayedSource, displayedSource, sourceLanguage);
+            if (replacePendingText)
+            {
+                if (_pendingUtterance.CumulativeRevisionStart != start)
+                {
+                    _pendingUtterance.CumulativeSourcePrefix = _pendingUtterance.SourceText;
+                    _pendingUtterance.CumulativeDisplayedPrefix = _pendingUtterance.DisplayedSource;
+                    _pendingUtterance.CumulativeRevisionStart = start;
+                }
+
+                _pendingUtterance.SourceText = SemanticSubtitleBuffer.JoinFragments(
+                    _pendingUtterance.CumulativeSourcePrefix, sourceText, sourceLanguage);
+                _pendingUtterance.DisplayedSource = SemanticSubtitleBuffer.JoinFragments(
+                    _pendingUtterance.CumulativeDisplayedPrefix, displayedSource, sourceLanguage);
+            }
+            else
+            {
+                _pendingUtterance.SourceText = SemanticSubtitleBuffer.JoinFragments(
+                    _pendingUtterance.SourceText, sourceText, sourceLanguage);
+                _pendingUtterance.DisplayedSource = SemanticSubtitleBuffer.JoinFragments(
+                    _pendingUtterance.DisplayedSource, displayedSource, sourceLanguage);
+            }
         }
 
-        _translationWindow.UpdateStream(_pendingUtterance.SourceText);
+        if (replacePendingText)
+            _translationWindow.ReplaceStream(_pendingUtterance.SourceText);
+        else
+            _translationWindow.UpdateStream(_pendingUtterance.SourceText);
         SourceSegmentReady?.Invoke(this, new SubtitleSegment(
             _pendingUtterance.Start,
             _pendingUtterance.End,
@@ -851,7 +916,12 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         _asrHttpClient.Dispose();
     }
 
-    private sealed record AudioChunk(byte[] Pcm, TimeSpan Start, TimeSpan Duration, bool IsSpeechBoundary);
+    private sealed record AudioChunk(
+        byte[] Pcm,
+        TimeSpan Start,
+        TimeSpan Duration,
+        bool IsSpeechBoundary,
+        bool IsCumulative = false);
     private sealed class PendingUtterance
     {
         public long Sequence { get; init; }
@@ -861,6 +931,9 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         public required string DisplayedSource { get; set; }
         public required SupportedLanguage SourceLanguage { get; init; }
         public string LastQueuedSource { get; set; } = string.Empty;
+        public TimeSpan? CumulativeRevisionStart { get; set; }
+        public string CumulativeSourcePrefix { get; set; } = string.Empty;
+        public string CumulativeDisplayedPrefix { get; set; } = string.Empty;
     }
 
     private sealed record RecognizedSegment(

@@ -93,6 +93,25 @@ static async Task TestParakeetEnglishAsync(string modelDirectory)
             Console.WriteLine($"PARAKEET_INFERENCE_MS={stopwatch.ElapsedMilliseconds}");
             process.Refresh();
             Console.WriteLine($"PARAKEET_PRIVATE_MIB={process.PrivateMemorySize64 / 1024d / 1024d:F1}");
+
+            var snapshotStepBytes = 16000 * 2 * 135 / 100;
+            var snapshotBytes = 16000 * 2 * 18 / 10;
+            var snapshotIndex = 0;
+            string latestRevision = string.Empty;
+            while (snapshotBytes < pcm.Length)
+            {
+                var snapshot = pcm.AsSpan(0, snapshotBytes).ToArray();
+                var snapshotResult = await recognizer.TranscribeAsync(snapshot);
+                latestRevision = snapshotResult.Text;
+                Console.WriteLine($"PARAKEET_STREAM_{++snapshotIndex}={latestRevision}");
+                snapshotBytes += snapshotStepBytes;
+            }
+
+            latestRevision = result.Text;
+            Console.WriteLine($"PARAKEET_STREAM_FINAL={latestRevision}");
+            if (latestRevision.Contains("family", StringComparison.OrdinalIgnoreCase) ||
+                latestRevision.Contains("dance", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("A provisional Parakeet guess leaked into the final revision.");
         }
         Console.WriteLine($"PARAKEET={result.Text}");
         var normalized = result.Text.ToLowerInvariant();

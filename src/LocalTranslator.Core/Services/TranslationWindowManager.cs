@@ -53,6 +53,17 @@ public sealed class TranslationWindowManager
         }
     }
 
+    /// <summary>
+    /// Replaces the provisional ASR text with a newer recognition revision of the
+    /// same audio window. Corrected words must not be appended as a second fragment.
+    /// </summary>
+    public void ReplaceStream(string revisedText)
+    {
+        var incoming = Normalize(revisedText);
+        if (incoming.Length == 0) return;
+        lock (_syncRoot) _activeStream = incoming;
+    }
+
     public void FinalizeSentence(string finalText)
     {
         lock (_syncRoot)

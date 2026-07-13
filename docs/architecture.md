@@ -32,6 +32,7 @@ Provider Router
 - 默认离线翻译模型是软件托管的 TranslateGemma 4B Q4_K_M，注册表与模型文件分离，模型文件可卸载后重新安装。
 - 视频字幕使用系统输出设备的全部声音，分段识别会产生数秒延迟。
 - ASR 引擎可切换：默认使用由 Meetily 解码流程适配而来的 Parakeet TDT V3 INT8 进程内 ONNX 引擎识别英语/欧洲语言；SenseVoice 处理中文、日语和混说场景；Whisper GGML 作为内置 fallback。
+- Parakeet 对同一段发言采用累计修订：1.8 秒先发布预览，之后每新增约 1.35 秒音频便用当前整段音频重新识别，并覆盖同一字幕行；早期误听和跨切片词组会被后续上下文纠正，而不是固化成碎片。
 - Meetily Parakeet 模型由 `SpeechModelManager` 下载到数据盘，逐文件校验长度；取消或失败会清理 `.download` 临时文件。`VideoSubtitleService.StopAsync` 会 Dispose 三个 ONNX Session，避免停止后继续持有模型。
 - Whisper fallback 模型由 `SpeechModelManager` 下载到应用数据目录，并在安装前校验文件长度与 SHA-256；失败或取消时清理临时文件。
 - 实时字幕按 WASAPI 设备真实混音格式采集，经立体声转单声道和 WDL 重采样后统一为 16 kHz PCM；不同 ASR 使用独立切片阈值和滚动重叠，静音/低置信度结果会被过滤。音频通道容量为 32 并使用背压等待，不再通过 `DropOldest` 静默漏掉语音。

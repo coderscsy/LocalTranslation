@@ -201,6 +201,21 @@ if (!mergedSenseVoiceWindows.Equals(expectedSenseVoiceWindows, StringComparison.
     throw new InvalidOperationException("Real SenseVoice rolling-window merge smoke test failed.");
 }
 
+const string stableParakeetPrefix = "Following my completion of undergraduate studies,";
+var provisionalParakeetRevision = SemanticSubtitleBuffer.JoinFragments(
+    stableParakeetPrefix,
+    "I am driven by a strong passion to pursue further active.",
+    SupportedLanguage.English);
+var correctedParakeetRevision = SemanticSubtitleBuffer.JoinFragments(
+    stableParakeetPrefix,
+    "I am driven by a strong passion to pursue further academic accomplishments in the field of finance.",
+    SupportedLanguage.English);
+if (!provisionalParakeetRevision.Contains("further active", StringComparison.Ordinal) ||
+    !correctedParakeetRevision.Equals(expectedFinanceSentence, StringComparison.Ordinal))
+{
+    throw new InvalidOperationException("Cumulative Parakeet revision replacement smoke test failed.");
+}
+
 var correlatedSource = new SubtitleSegment(TimeSpan.Zero, TimeSpan.FromSeconds(2),
     "Following my completion", string.Empty, 42);
 var correlatedFinal = correlatedSource with
@@ -247,12 +262,15 @@ translationWindow.UpdateStream("Hello");
 translationWindow.UpdateStream("Hello world");
 if (translationWindow.ActiveStream != "Hello world")
     throw new InvalidOperationException("Accumulated ASR stream update failed.");
-translationWindow.FinalizeSentence("Hello world.");
+translationWindow.ReplaceStream("Hello corrected world");
+if (translationWindow.ActiveStream != "Hello corrected world")
+    throw new InvalidOperationException("Corrected ASR revision was appended instead of replacing the active stream.");
+translationWindow.FinalizeSentence("Hello corrected world.");
 translationWindow.FinalizeSentence("Second sentence.");
 translationWindow.FinalizeSentence("Third sentence.");
 translationWindow.FinalizeSentence("Fourth sentence.");
 translationWindow.UpdateStream("Current fragment");
-if (translationWindow.HistoricalContext.Contains("Hello world.", StringComparison.Ordinal) ||
+if (translationWindow.HistoricalContext.Contains("Hello corrected world.", StringComparison.Ordinal) ||
     !translationWindow.HistoricalContext.StartsWith("Second sentence.", StringComparison.Ordinal) ||
     translationWindow.GetPromptPayload() !=
     "【前文背景】：Second sentence.\nThird sentence.\nFourth sentence.\n【当前待译文本】：Current fragment")
