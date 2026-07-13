@@ -29,9 +29,14 @@
                         </Border>
                     </Grid>
                     <Grid Margin="0,12,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="260"/>
                             <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="160"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Margin="0,0,12,0">
                             <TextBlock FontSize="12" FontWeight="SemiBold" Text="ASR 引擎"/>
@@ -42,8 +47,23 @@
                         <StackPanel Grid.Column="1">
                             <TextBlock FontSize="12" FontWeight="SemiBold" Text="SenseVoice / FunASR 本地服务地址"/>
                             <TextBox x:Name="SenseVoiceUrlBox" Margin="0,7,0,0" Height="42"
-                                     Text="http://127.0.0.1:10095/v1"
-                                     ToolTip="填写本机或局域网 FunASR OpenAI-compatible ASR 地址，例如 http://127.0.0.1:10095/v1"/>
+                                     Text="http://127.0.0.1:8899/v1"
+                                     ToolTip="填写本机或局域网 FunASR OpenAI-compatible ASR 地址，例如 http://127.0.0.1:8899/v1"/>
+                        </StackPanel>
+                        <Button x:Name="TestAsrButton" Grid.Column="2" Height="42" Margin="8,19,0,0"
+                                Padding="12,0" Style="{StaticResource SecondaryButtonStyle}"
+                                Content="测试 ASR 服务" Click="TestAsrService_Click"/>
+                        <WrapPanel Grid.Row="1" Grid.Column="0" Margin="0,10,12,0" VerticalAlignment="Center">
+                            <CheckBox x:Name="EnableSenseVoiceCheck" IsChecked="True" Content="启用 SenseVoice"
+                                      Checked="AsrEngineAvailability_Changed" Unchecked="AsrEngineAvailability_Changed"/>
+                            <CheckBox x:Name="EnableWhisperCheck" Margin="14,0,0,0" IsChecked="True" Content="启用 Whisper"
+                                      Checked="AsrEngineAvailability_Changed" Unchecked="AsrEngineAvailability_Changed"/>
+                        </WrapPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0">
+                            <TextBlock FontSize="12" FontWeight="SemiBold" Text="SenseVoice / FunASR 模型名"/>
+                            <TextBox x:Name="SenseVoiceModelBox" Margin="0,7,0,0" Height="42"
+                                     Text="fun-asr-nano"
+                                     ToolTip="填写 FunASR/OpenAI-compatible ASR 暴露的模型名，例如 fun-asr-nano、SenseVoiceSmall 或你的自定义模型名。"/>
                         </StackPanel>
                     </Grid>
 

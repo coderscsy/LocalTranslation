@@ -42,6 +42,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     private SupportedLanguage _target;
     private SpeechRecognitionEngine _recognitionEngine = SpeechRecognitionEngine.WhisperGgml;
     private Uri? _senseVoiceEndpoint;
+    private string _senseVoiceModel = "fun-asr-nano";
     private long _recognizedVersion;
     private PendingUtterance? _pendingUtterance;
     private readonly TranslationWindowManager _translationWindow = new();
@@ -63,6 +64,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         SpeechRecognitionEngine recognitionEngine,
         string whisperModelPath,
         string senseVoiceBaseUrl,
+        string senseVoiceModel,
         SupportedLanguage source,
         SupportedLanguage target,
         int translationConcurrency = 3,
@@ -76,6 +78,9 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             _senseVoiceEndpoint = BuildTranscriptionEndpoint(senseVoiceBaseUrl);
         else
             _senseVoiceEndpoint = null;
+        _senseVoiceModel = string.IsNullOrWhiteSpace(senseVoiceModel)
+            ? "fun-asr-nano"
+            : senseVoiceModel.Trim();
         _source = source;
         _target = target;
         _chunks = CreateAudioChannel();
@@ -301,7 +306,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                     AppendRecognizedText(sourceText, displayedSource, resolvedSource, start, end);
                     logger.Info($"Video speech recognized. Start={start}, SourceChars={sourceText.Length}.");
                 }
-                if (chunk.IsSpeechBoundary) FlushPendingUtterance();
+                if (chunk.IsSpeechBoundary) FlushPendingUtteranceIfReady();
                 stopwatch.Stop();
                 StatusChanged?.Invoke(this, $"监听中 · 本段处理 {stopwatch.Elapsed.TotalSeconds:F1} 秒 · 等待下一段对话…");
             }
@@ -338,7 +343,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                     logger.Info($"SenseVoice speech recognized. Start={chunk.Start}, SourceChars={sourceText.Length}.");
                 }
 
-                if (chunk.IsSpeechBoundary) FlushPendingUtterance();
+                if (chunk.IsSpeechBoundary) FlushPendingUtteranceIfReady();
                 stopwatch.Stop();
                 StatusChanged?.Invoke(this,
                     $"监听中 · SenseVoice 本段处理 {stopwatch.Elapsed.TotalSeconds:F1} 秒 · 等待下一段对话…");
@@ -361,7 +366,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         using var file = new StreamContent(wav);
         file.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
         content.Add(file, "file", "subtitle.wav");
-        content.Add(new StringContent("SenseVoiceSmall"), "model");
+        content.Add(new StringContent(_senseVoiceModel), "model");
         if (_source != SupportedLanguage.AutoDetect)
             content.Add(new StringContent(_source.ToCode()), "language");
 
@@ -373,11 +378,38 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         return ExtractTranscriptionText(body);
     }
 
+    public static async Task<string> TestSenseVoiceEndpointAsync(
+        string baseUrl,
+        string model,
+        CancellationToken cancellationToken = default)
+    {
+        var endpoint = BuildTranscriptionEndpoint(baseUrl);
+        var modelName = string.IsNullOrWhiteSpace(model) ? "fun-asr-nano" : model.Trim();
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        await using var wav = CreateWaveStream(new byte[WhisperWaveFormat.AverageBytesPerSecond / 2]);
+        using var content = new MultipartFormDataContent();
+        using var file = new StreamContent(wav);
+        file.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+        content.Add(file, "file", "asr-test.wav");
+        content.Add(new StringContent(modelName), "model");
+
+        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken)
+            .ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            throw new OfflineEngineException($"ASR 服务返回 HTTP {(int)response.StatusCode}：{body}");
+
+        var text = ExtractTranscriptionText(body);
+        return string.IsNullOrWhiteSpace(text)
+            ? "连接成功，静音测试音频返回空文本。"
+            : text;
+    }
+
     private static Uri BuildTranscriptionEndpoint(string baseUrl)
     {
         if (string.IsNullOrWhiteSpace(baseUrl))
             throw new OfflineEngineException(
-                "SenseVoice Small 需要填写本地 FunASR/OpenAI-compatible ASR 地址，例如 http://127.0.0.1:10095/v1。");
+                "SenseVoice Small 需要填写本地 FunASR/OpenAI-compatible ASR 地址，例如 http://127.0.0.1:8899/v1。");
         var value = baseUrl.Trim().TrimEnd('/');
         if (value.EndsWith("/audio/transcriptions", StringComparison.OrdinalIgnoreCase))
             return new Uri(value);
@@ -495,6 +527,18 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         logger.Info($"Video utterance committed. Start={pending.Start}, SourceChars={sourceText.Length}.");
     }
 
+    private void FlushPendingUtteranceIfReady()
+    {
+        var pending = _pendingUtterance;
+        if (pending is null) return;
+        if (SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary(
+                pending.SourceText,
+                pending.End - pending.Start))
+        {
+            FlushPendingUtterance();
+        }
+    }
+
     private static bool ShouldFlushPending(PendingUtterance pending) =>
         SemanticSubtitleBuffer.ShouldFlush(pending.SourceText, pending.End - pending.Start);
 
@@ -593,7 +637,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         return Math.Sqrt(sum / samples) < 0.0048;
     }
 
-    private MemoryStream CreateWaveStream(byte[] pcm)
+    private static MemoryStream CreateWaveStream(byte[] pcm)
     {
         var stream = new MemoryStream();
         using (var writer = new WaveFileWriter(new IgnoreDisposeStream(stream), WhisperWaveFormat)) writer.Write(pcm, 0, pcm.Length);

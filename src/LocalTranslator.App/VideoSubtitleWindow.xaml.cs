@@ -108,23 +108,75 @@ public partial class VideoSubtitleWindow : Window
         if (_settingsLoaded) SaveSettings();
     }
 
+    private void AsrEngineAvailability_Changed(object sender, RoutedEventArgs e)
+    {
+        RefreshAsrEngineUi();
+        if (_settingsLoaded) SaveSettings();
+    }
+
     private void RefreshAsrEngineUi()
     {
         var engine = (AsrEngineCombo.SelectedItem as AsrEngineChoice)?.Engine
                      ?? SpeechRecognitionEngine.SenseVoiceSmall;
+        if (!IsAsrEngineEnabled(engine))
+        {
+            var fallback = EnableSenseVoiceCheck.IsChecked == true
+                ? SpeechRecognitionEngine.SenseVoiceSmall
+                : EnableWhisperCheck.IsChecked == true
+                    ? SpeechRecognitionEngine.WhisperGgml
+                    : engine;
+            if (fallback != engine)
+            {
+                AsrEngineCombo.SelectedItem = AsrEngines.First(item => item.Engine == fallback);
+                engine = fallback;
+            }
+        }
+
+        var anyAsrEnabled = EnableSenseVoiceCheck.IsChecked == true || EnableWhisperCheck.IsChecked == true;
         var useWhisper = engine == SpeechRecognitionEngine.WhisperGgml;
         WhisperModelTitle.Opacity = useWhisper ? 1 : 0.45;
         ModelPathBox.IsEnabled = useWhisper && !_running;
         DefaultModelPathText.Opacity = useWhisper ? 1 : 0.45;
-        InstallDefaultModelButton.IsEnabled = useWhisper;
-        UninstallDefaultModelButton.IsEnabled = useWhisper;
+        InstallDefaultModelButton.IsEnabled = useWhisper && EnableWhisperCheck.IsChecked == true;
+        UninstallDefaultModelButton.IsEnabled = useWhisper && EnableWhisperCheck.IsChecked == true;
         SenseVoiceUrlBox.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && !_running;
+        SenseVoiceModelBox.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && !_running;
+        TestAsrButton.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && EnableSenseVoiceCheck.IsChecked == true && !_running;
+        if (!_running) StartButton.IsEnabled = anyAsrEnabled;
         DefaultModelStatusText.Text = engine == SpeechRecognitionEngine.SenseVoiceSmall
             ? "推荐默认"
             : _speechModelManager.IsDefaultModelInstalled ? "已安装 · 当前默认" : "未安装";
         StatusText.Text = engine == SpeechRecognitionEngine.SenseVoiceSmall
             ? "当前 ASR：SenseVoice Small。请确认本地 FunASR/OpenAI-compatible ASR 服务已启动。"
             : "当前 ASR：Whisper GGML。可使用内置默认模型或自己的 GGML 模型。";
+    }
+
+    private bool IsAsrEngineEnabled(SpeechRecognitionEngine engine) => engine switch
+    {
+        SpeechRecognitionEngine.SenseVoiceSmall => EnableSenseVoiceCheck.IsChecked == true,
+        SpeechRecognitionEngine.WhisperGgml => EnableWhisperCheck.IsChecked == true,
+        _ => false
+    };
+
+    private async void TestAsrService_Click(object sender, RoutedEventArgs e)
+    {
+        TestAsrButton.IsEnabled = false;
+        StatusText.Text = "正在测试 ASR 服务…";
+        try
+        {
+            var result = await VideoSubtitleService.TestSenseVoiceEndpointAsync(
+                SenseVoiceUrlBox.Text.Trim(),
+                SenseVoiceModelBox.Text.Trim());
+            StatusText.Text = $"ASR 测试成功：{result}";
+        }
+        catch (Exception exception)
+        {
+            StatusText.Text = $"ASR 测试失败：{exception.Message}";
+        }
+        finally
+        {
+            RefreshAsrEngineUi();
+        }
     }
 
     private async void InstallDefaultModel_Click(object sender, RoutedEventArgs e)
@@ -241,10 +293,13 @@ public partial class VideoSubtitleWindow : Window
                 ? selectedConcurrency
                 : 3;
             var asrEngine = ((AsrEngineChoice)AsrEngineCombo.SelectedItem).Engine;
+            if (!IsAsrEngineEnabled(asrEngine))
+                throw new InvalidOperationException("当前 ASR 引擎已禁用，请先启用或切换到可用引擎。");
             await _service.StartAsync(
                 asrEngine,
                 ModelPathBox.Text.Trim(),
                 SenseVoiceUrlBox.Text.Trim(),
+                SenseVoiceModelBox.Text.Trim(),
                 source,
                 target,
                 concurrency);
@@ -585,8 +640,13 @@ public partial class VideoSubtitleWindow : Window
             var migrateCompactOverlay = settings.OverlayLayoutVersion < CurrentOverlayLayoutVersion;
             ModelPathBox.Text = settings.WhisperModelPath ?? string.Empty;
             SenseVoiceUrlBox.Text = string.IsNullOrWhiteSpace(settings.SenseVoiceBaseUrl)
-                ? "http://127.0.0.1:10095/v1"
+                ? "http://127.0.0.1:8899/v1"
                 : settings.SenseVoiceBaseUrl;
+            SenseVoiceModelBox.Text = string.IsNullOrWhiteSpace(settings.SenseVoiceModel)
+                ? "fun-asr-nano"
+                : settings.SenseVoiceModel;
+            EnableSenseVoiceCheck.IsChecked = settings.EnableSenseVoice;
+            EnableWhisperCheck.IsChecked = settings.EnableWhisper;
             AsrEngineCombo.SelectedItem = AsrEngines.FirstOrDefault(item =>
                                              item.Engine == settings.AsrEngine)
                                          ?? AsrEngines[0];
@@ -637,6 +697,9 @@ public partial class VideoSubtitleWindow : Window
                         ?? SpeechRecognitionEngine.SenseVoiceSmall,
             WhisperModelPath = ModelPathBox.Text.Trim(),
             SenseVoiceBaseUrl = SenseVoiceUrlBox.Text.Trim(),
+            SenseVoiceModel = SenseVoiceModelBox.Text.Trim(),
+            EnableSenseVoice = EnableSenseVoiceCheck.IsChecked == true,
+            EnableWhisper = EnableWhisperCheck.IsChecked == true,
             SourceFontSize = SourceFontSlider.Value,
             TranslationFontSize = TranslationFontSlider.Value,
             BottomOffset = BottomOffsetSlider.Value,
@@ -658,7 +721,10 @@ public partial class VideoSubtitleWindow : Window
     {
         public SpeechRecognitionEngine AsrEngine { get; init; } = SpeechRecognitionEngine.SenseVoiceSmall;
         public string? WhisperModelPath { get; init; }
-        public string SenseVoiceBaseUrl { get; init; } = "http://127.0.0.1:10095/v1";
+        public string SenseVoiceBaseUrl { get; init; } = "http://127.0.0.1:8899/v1";
+        public string SenseVoiceModel { get; init; } = "fun-asr-nano";
+        public bool EnableSenseVoice { get; init; } = true;
+        public bool EnableWhisper { get; init; } = true;
         public double SourceFontSize { get; init; } = 17;
         public double TranslationFontSize { get; init; } = 24;
         public double BottomOffset { get; init; } = 28;

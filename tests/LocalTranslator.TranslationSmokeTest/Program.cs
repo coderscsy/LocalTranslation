@@ -144,9 +144,42 @@ var mergedBrokenFinanceSentence = SemanticSubtitleBuffer.MergeFragments(
     SupportedLanguage.English);
 if (SemanticSubtitleBuffer.ShouldFlush("Following my completion of undergraduate studies.", TimeSpan.FromSeconds(1.4)) ||
     SemanticSubtitleBuffer.ShouldFlush("Strong passion.", TimeSpan.FromSeconds(1)) ||
+    SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary("studies.", TimeSpan.FromSeconds(1.1)) ||
+    SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary("of finance.", TimeSpan.FromSeconds(1.1)) ||
+    !SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary(expectedFinanceSentence, TimeSpan.FromSeconds(4.3)) ||
     mergedBrokenFinanceSentence.Contains("field. of", StringComparison.OrdinalIgnoreCase))
 {
     throw new InvalidOperationException("Broken ASR subtitle fragment buffering smoke test failed.");
+}
+
+const string asrPrefix = "http://127.0.0.1:18992/";
+using (var asrListener = new HttpListener())
+{
+    asrListener.Prefixes.Add(asrPrefix);
+    asrListener.Start();
+    var asrServerTask = Task.Run(async () =>
+    {
+        var context = await asrListener.GetContextAsync();
+        if (context.Request.Url?.AbsolutePath != "/v1/audio/transcriptions" ||
+            !string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("ASR endpoint was not called as an OpenAI-compatible transcription request.");
+        }
+
+        var bytes = Encoding.UTF8.GetBytes("{\"text\":\"hello\"}");
+        context.Response.StatusCode = 200;
+        context.Response.ContentType = "application/json";
+        context.Response.ContentLength64 = bytes.Length;
+        await context.Response.OutputStream.WriteAsync(bytes);
+        context.Response.Close();
+    });
+
+    var asrResult = await VideoSubtitleService.TestSenseVoiceEndpointAsync(
+        $"{asrPrefix}v1",
+        "fun-asr-nano");
+    await asrServerTask;
+    if (asrResult != "hello")
+        throw new InvalidOperationException("OpenAI-compatible ASR endpoint smoke test failed.");
 }
 
 var translationWindow = new TranslationWindowManager();

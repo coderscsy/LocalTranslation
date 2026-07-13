@@ -63,6 +63,7 @@ public partial class SubtitleOverlayWindow : Window
         SetTargetLanguage(targetLanguage);
         ShowInTaskbar = false;
         SubtitleItemsControl.ItemsSource = _subtitleLines;
+        RefreshEmptyState();
         ApplyLayout(sourceFontSize, translationFontSize, bottomOffset, overlayWidth, false);
         ApplyBackgroundOpacity(backgroundOpacity);
         RefreshToolbarText();
@@ -192,6 +193,7 @@ public partial class SubtitleOverlayWindow : Window
         line.IsPending = true;
         ApplyLineStyle(line, true);
         TrimSubtitleLines();
+        RefreshEmptyState();
         ScrollToLatestSubtitle();
     }
 
@@ -216,6 +218,7 @@ public partial class SubtitleOverlayWindow : Window
         line.IsPending = false;
         ApplyLineStyle(line, false);
         TrimSubtitleLines();
+        RefreshEmptyState();
         ScrollToLatestSubtitle();
     }
 
@@ -225,6 +228,13 @@ public partial class SubtitleOverlayWindow : Window
         while (_subtitleLines.Count > maximumLines)
             _subtitleLines.RemoveAt(0);
         RefreshLineStyles();
+        RefreshEmptyState();
+    }
+
+    private void RefreshEmptyState()
+    {
+        if (!IsInitialized) return;
+        EmptyStateText.Visibility = _subtitleLines.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ApplyLineStyle(OverlaySubtitleLine line, bool pending)
@@ -459,7 +469,31 @@ public partial class SubtitleOverlayWindow : Window
 
     private void CycleFontSize_Click(object sender, RoutedEventArgs e)
     {
-        _fontPreset = (_fontPreset + 1) % 3;
+        if (!_interactionEnabled) return;
+
+        var menu = CreateOverlayDropDown(FontSizeButton);
+        AddFontSizeMenuItem(menu, "小号字体", 0);
+        AddFontSizeMenuItem(menu, "中号字体", 1);
+        AddFontSizeMenuItem(menu, "大号字体", 2);
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private void AddFontSizeMenuItem(ContextMenu menu, string label, int preset)
+    {
+        var item = new MenuItem
+        {
+            Header = label,
+            IsCheckable = true,
+            IsChecked = _fontPreset == preset
+        };
+        item.Click += (_, _) => ApplyFontPreset(preset);
+        menu.Items.Add(item);
+    }
+
+    private void ApplyFontPreset(int preset)
+    {
+        _fontPreset = preset;
         (_sourceFontSize, _translationFontSize) = _fontPreset switch
         {
             0 => (15, 20),
@@ -507,11 +541,7 @@ public partial class SubtitleOverlayWindow : Window
     {
         if (!_interactionEnabled) return;
 
-        var menu = new ContextMenu
-        {
-            PlacementTarget = TargetLanguageButton,
-            Placement = PlacementMode.Bottom
-        };
+        var menu = CreateOverlayDropDown(TargetLanguageButton);
 
         foreach (var item in LanguageItem.Targets)
         {
@@ -533,6 +563,27 @@ public partial class SubtitleOverlayWindow : Window
 
         menu.IsOpen = true;
         e.Handled = true;
+    }
+
+    private static ContextMenu CreateOverlayDropDown(FrameworkElement target)
+    {
+        var menu = new ContextMenu
+        {
+            PlacementTarget = target,
+            Placement = PlacementMode.Bottom,
+            Background = new SolidColorBrush(Color.FromRgb(52, 52, 52)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(70, 255, 255, 255)),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(6)
+        };
+        var itemStyle = new Style(typeof(MenuItem));
+        itemStyle.Setters.Add(new Setter(Control.ForegroundProperty, Brushes.White));
+        itemStyle.Setters.Add(new Setter(Control.BackgroundProperty, Brushes.Transparent));
+        itemStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(14, 8, 14, 8)));
+        itemStyle.Setters.Add(new Setter(Control.FontSizeProperty, 13d));
+        itemStyle.Setters.Add(new Setter(Control.FontWeightProperty, FontWeights.SemiBold));
+        menu.ItemContainerStyle = itemStyle;
+        return menu;
     }
 
     private void ResetPositionMenuItem_Click(object sender, RoutedEventArgs e) => ResetPosition();

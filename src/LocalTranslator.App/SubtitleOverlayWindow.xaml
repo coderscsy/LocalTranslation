@@ -119,8 +119,39 @@
 
                 <ScrollViewer x:Name="SubtitleScrollViewer"
                               Grid.Row="2"
-                              VerticalScrollBarVisibility="Hidden"
+                              VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="{x:Type ScrollBar}">
+                            <Setter Property="Width" Value="8"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="{x:Type ScrollBar}">
+                                        <Grid Background="Transparent">
+                                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                                <Track.DecreaseRepeatButton>
+                                                    <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" IsTabStop="False"/>
+                                                </Track.DecreaseRepeatButton>
+                                                <Track.Thumb>
+                                                    <Thumb Background="#55FFFFFF">
+                                                        <Thumb.Template>
+                                                            <ControlTemplate TargetType="{x:Type Thumb}">
+                                                                <Border Width="6" Margin="1" Background="{TemplateBinding Background}" CornerRadius="3"/>
+                                                            </ControlTemplate>
+                                                        </Thumb.Template>
+                                                    </Thumb>
+                                                </Track.Thumb>
+                                                <Track.IncreaseRepeatButton>
+                                                    <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" IsTabStop="False"/>
+                                                </Track.IncreaseRepeatButton>
+                                            </Track>
+                                        </Grid>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ScrollViewer.Resources>
                     <ItemsControl x:Name="SubtitleItemsControl" VerticalAlignment="Top">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
@@ -165,6 +196,17 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
+
+                <TextBlock x:Name="EmptyStateText"
+                           Grid.Row="2"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           Foreground="#B8B8B8"
+                           FontFamily="Segoe UI, Microsoft YaHei UI"
+                           FontSize="15"
+                           FontWeight="SemiBold"
+                           IsHitTestVisible="False"
+                           Text="暂无音频播放" />
 
                 <Border x:Name="InteractionHint"
                         Margin="0,-34,0,0"

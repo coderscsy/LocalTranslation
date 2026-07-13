@@ -11,6 +11,12 @@ public static class SemanticSubtitleBuffer
         "when ", "while ", "into ", "about ", "a ", "an ", "the "
     ];
 
+    private static readonly string[] WeakEnglishEndings =
+    [
+        "completion", "studies", "passion", "field", "pursue further",
+        "driven by", "strong", "academic", "undergraduate", "following my"
+    ];
+
     public static string MergeFragments(IEnumerable<string> fragments, SupportedLanguage language)
     {
         var merged = string.Empty;
@@ -23,8 +29,23 @@ public static class SemanticSubtitleBuffer
     {
         var normalized = Normalize(text);
         if (string.IsNullOrWhiteSpace(normalized)) return false;
+
         return duration >= TimeSpan.FromSeconds(4.2) ||
                normalized.Length >= 180;
+    }
+
+    public static bool ShouldFlushOnSpeechBoundary(string text, TimeSpan duration)
+    {
+        var normalized = Normalize(text);
+        if (string.IsNullOrWhiteSpace(normalized)) return false;
+        if (ShouldFlush(normalized, duration)) return true;
+        if (LooksLikeContinuationFragment(normalized)) return false;
+        if (HasWeakEnding(normalized)) return false;
+
+        var wordCount = CountWords(normalized);
+        if (wordCount <= 2) return false;
+
+        return duration >= TimeSpan.FromSeconds(1.2) && wordCount >= 3;
     }
 
     public static string JoinFragments(string existing, string next, SupportedLanguage language)
@@ -57,9 +78,20 @@ public static class SemanticSubtitleBuffer
     {
         var value = text.Trim().TrimStart('"', '\'', '“', '‘', '(');
         var lower = value.ToLowerInvariant();
-        var wordCount = lower.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
-        return wordCount <= 7 && ContinuationStarters.Any(lower.StartsWith);
+        var wordCount = CountWords(lower);
+        return wordCount <= 2 ||
+               wordCount <= 9 && lower.StartsWith("following ", StringComparison.Ordinal) ||
+               wordCount <= 7 && ContinuationStarters.Any(lower.StartsWith);
     }
+
+    private static bool HasWeakEnding(string text)
+    {
+        var lower = text.Trim().TrimEnd('.', '!', '?', '。', '！', '？').ToLowerInvariant();
+        return WeakEnglishEndings.Any(ending => lower.EndsWith(ending, StringComparison.Ordinal));
+    }
+
+    private static int CountWords(string text) =>
+        text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
     private static bool EndsSentence(string text)
     {
@@ -73,10 +105,10 @@ public static class SemanticSubtitleBuffer
     }
 
     private static bool NeedsNoSpaceBefore(string text) =>
-        text.Length > 0 && ",.;:!?%)]}，。；：！？）】》".Contains(text[0]);
+        text.Length > 0 && ",.;:!?%)]}，。；：！？）】」』".Contains(text[0]);
 
     private static bool NeedsNoSpaceAfter(string text) =>
-        text.Length > 0 && "([{（【《".Contains(text[^1]);
+        text.Length > 0 && "([{（【「『".Contains(text[^1]);
 
     private static string TrimSoftSentenceEnding(string text) =>
         text.TrimEnd().TrimEnd('.', '。');
