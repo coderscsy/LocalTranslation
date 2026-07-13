@@ -6,7 +6,7 @@ obj/
 artifacts/
 *.user
 *.suo
-models/
-Models/
-logs/
+/models/
+/Models/
+/logs/
 tests/LocalTranslator.OcrSmokeTest/ocr-smoke-input.png

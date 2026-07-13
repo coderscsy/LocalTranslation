@@ -55,11 +55,13 @@ public partial class VideoSubtitleWindow : Window
         DataContext = this;
         SourceCombo.SelectedIndex = 0;
         TargetCombo.SelectedItem = TargetLanguages.First(item => item.Value == SupportedLanguage.ChineseSimplified);
+        AsrEngineCombo.SelectedItem = AsrEngines[0];
         _settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LocalTranslator", "video-subtitle-settings.json");
         LoadSettings();
         _settingsLoaded = true;
         SaveSettings();
         RefreshDefaultModelStatus();
+        RefreshAsrEngineUi();
         Closing += VideoSubtitleWindow_Closing;
         Closed += (_, _) =>
         {
@@ -70,6 +72,11 @@ public partial class VideoSubtitleWindow : Window
 
     public IReadOnlyList<LanguageItem> SourceLanguages { get; }
     public IReadOnlyList<LanguageItem> TargetLanguages { get; }
+    public IReadOnlyList<AsrEngineChoice> AsrEngines { get; } =
+    [
+        new(SpeechRecognitionEngine.SenseVoiceSmall, "SenseVoice Small（推荐，需本地 FunASR 服务）"),
+        new(SpeechRecognitionEngine.WhisperGgml, "Whisper GGML（内置 fallback）")
+    ];
     public ObservableCollection<SubtitleRow> Segments { get; } = [];
     public ObservableCollection<VideoProviderChoice> VideoProviders { get; }
     public ObservableCollection<string> VideoModels { get; } = [];
@@ -93,6 +100,31 @@ public partial class VideoSubtitleWindow : Window
     {
         var dialog = new OpenFileDialog { Filter = "Whisper GGML 模型 (*.bin)|*.bin|所有文件 (*.*)|*.*" };
         if (dialog.ShowDialog(this) == true) ModelPathBox.Text = dialog.FileName;
+    }
+
+    private void AsrEngine_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        RefreshAsrEngineUi();
+        if (_settingsLoaded) SaveSettings();
+    }
+
+    private void RefreshAsrEngineUi()
+    {
+        var engine = (AsrEngineCombo.SelectedItem as AsrEngineChoice)?.Engine
+                     ?? SpeechRecognitionEngine.SenseVoiceSmall;
+        var useWhisper = engine == SpeechRecognitionEngine.WhisperGgml;
+        WhisperModelTitle.Opacity = useWhisper ? 1 : 0.45;
+        ModelPathBox.IsEnabled = useWhisper && !_running;
+        DefaultModelPathText.Opacity = useWhisper ? 1 : 0.45;
+        InstallDefaultModelButton.IsEnabled = useWhisper;
+        UninstallDefaultModelButton.IsEnabled = useWhisper;
+        SenseVoiceUrlBox.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && !_running;
+        DefaultModelStatusText.Text = engine == SpeechRecognitionEngine.SenseVoiceSmall
+            ? "推荐默认"
+            : _speechModelManager.IsDefaultModelInstalled ? "已安装 · 当前默认" : "未安装";
+        StatusText.Text = engine == SpeechRecognitionEngine.SenseVoiceSmall
+            ? "当前 ASR：SenseVoice Small。请确认本地 FunASR/OpenAI-compatible ASR 服务已启动。"
+            : "当前 ASR：Whisper GGML。可使用内置默认模型或自己的 GGML 模型。";
     }
 
     private async void InstallDefaultModel_Click(object sender, RoutedEventArgs e)
@@ -208,10 +240,17 @@ public partial class VideoSubtitleWindow : Window
             var concurrency = VideoConcurrencyCombo.SelectedItem is int selectedConcurrency
                 ? selectedConcurrency
                 : 3;
-            await _service.StartAsync(ModelPathBox.Text.Trim(), source, target, concurrency);
+            var asrEngine = ((AsrEngineChoice)AsrEngineCombo.SelectedItem).Engine;
+            await _service.StartAsync(
+                asrEngine,
+                ModelPathBox.Text.Trim(),
+                SenseVoiceUrlBox.Text.Trim(),
+                source,
+                target,
+                concurrency);
             _running = true;
             StartButton.Content = "停止翻译";
-            ModelPathBox.IsEnabled = false;
+            RefreshAsrEngineUi();
             (Owner as MainWindow)?.MinimizeForSubtitle();
         }
         catch (Exception exception)
@@ -235,7 +274,7 @@ public partial class VideoSubtitleWindow : Window
             _running = false;
             StartButton.Content = "开始翻译";
             StartButton.IsEnabled = true;
-            ModelPathBox.IsEnabled = true;
+            RefreshAsrEngineUi();
             _overlay?.Close(); _overlay = null;
             if (!_allowClose)
             {
@@ -545,6 +584,12 @@ public partial class VideoSubtitleWindow : Window
                 : new VideoSettings();
             var migrateCompactOverlay = settings.OverlayLayoutVersion < CurrentOverlayLayoutVersion;
             ModelPathBox.Text = settings.WhisperModelPath ?? string.Empty;
+            SenseVoiceUrlBox.Text = string.IsNullOrWhiteSpace(settings.SenseVoiceBaseUrl)
+                ? "http://127.0.0.1:10095/v1"
+                : settings.SenseVoiceBaseUrl;
+            AsrEngineCombo.SelectedItem = AsrEngines.FirstOrDefault(item =>
+                                             item.Engine == settings.AsrEngine)
+                                         ?? AsrEngines[0];
             SourceFontSlider.Value = migrateCompactOverlay ? 17 : settings.SourceFontSize;
             TranslationFontSlider.Value = migrateCompactOverlay ? 24 : settings.TranslationFontSize;
             BottomOffsetSlider.Value = settings.BottomOffset;
@@ -588,7 +633,10 @@ public partial class VideoSubtitleWindow : Window
         Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
         File.WriteAllText(_settingsPath, JsonSerializer.Serialize(new VideoSettings
         {
+            AsrEngine = (AsrEngineCombo.SelectedItem as AsrEngineChoice)?.Engine
+                        ?? SpeechRecognitionEngine.SenseVoiceSmall,
             WhisperModelPath = ModelPathBox.Text.Trim(),
+            SenseVoiceBaseUrl = SenseVoiceUrlBox.Text.Trim(),
             SourceFontSize = SourceFontSlider.Value,
             TranslationFontSize = TranslationFontSlider.Value,
             BottomOffset = BottomOffsetSlider.Value,
@@ -608,7 +656,9 @@ public partial class VideoSubtitleWindow : Window
 
     private sealed class VideoSettings
     {
+        public SpeechRecognitionEngine AsrEngine { get; init; } = SpeechRecognitionEngine.SenseVoiceSmall;
         public string? WhisperModelPath { get; init; }
+        public string SenseVoiceBaseUrl { get; init; } = "http://127.0.0.1:10095/v1";
         public double SourceFontSize { get; init; } = 17;
         public double TranslationFontSize { get; init; } = 24;
         public double BottomOffset { get; init; } = 28;
@@ -650,6 +700,11 @@ public partial class VideoSubtitleWindow : Window
 }
 
 public sealed record VideoProviderChoice(string Id, string DisplayName)
+{
+    public override string ToString() => DisplayName;
+}
+
+public sealed record AsrEngineChoice(SpeechRecognitionEngine Engine, string DisplayName)
 {
     public override string ToString() => DisplayName;
 }

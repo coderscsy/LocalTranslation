@@ -20,14 +20,33 @@
                 <StackPanel Grid.ColumnSpan="2">
                     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                         <StackPanel>
-                            <TextBlock FontSize="14" FontWeight="SemiBold" Text="默认语音识别模型"/>
+                            <TextBlock FontSize="14" FontWeight="SemiBold" Text="语音识别引擎"/>
                             <TextBlock Margin="0,3,0,0" FontSize="11" Foreground="{StaticResource MutedTextBrush}"
-                                       Text="Whisper Small Q5_1 · 中文均衡版 · 约 181 MiB · 上下文与重叠窗口提升对白准确率"/>
+                                       Text="默认推荐 SenseVoice Small；Whisper GGML 作为内置 fallback。"/>
                         </StackPanel>
                         <Border Grid.Column="1" Padding="10,5" VerticalAlignment="Center" Background="#FFF7E8" CornerRadius="12">
                             <TextBlock x:Name="DefaultModelStatusText" FontSize="11" FontWeight="SemiBold" Foreground="#B54708" Text="未安装"/>
                         </Border>
                     </Grid>
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="260"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Margin="0,0,12,0">
+                            <TextBlock FontSize="12" FontWeight="SemiBold" Text="ASR 引擎"/>
+                            <ComboBox x:Name="AsrEngineCombo" Margin="0,7,0,0" Height="42"
+                                      ItemsSource="{Binding AsrEngines}"
+                                      SelectionChanged="AsrEngine_SelectionChanged"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock FontSize="12" FontWeight="SemiBold" Text="SenseVoice / FunASR 本地服务地址"/>
+                            <TextBox x:Name="SenseVoiceUrlBox" Margin="0,7,0,0" Height="42"
+                                     Text="http://127.0.0.1:10095/v1"
+                                     ToolTip="填写本机或局域网 FunASR OpenAI-compatible ASR 地址，例如 http://127.0.0.1:10095/v1"/>
+                        </StackPanel>
+                    </Grid>
+
                     <Border Margin="0,12,0,0" Padding="14,12" Background="#F8F9FC" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10">
                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center">
@@ -48,7 +67,7 @@
                         </Grid>
                     </Border>
 
-                    <TextBlock Margin="0,14,0,0" FontSize="12" FontWeight="SemiBold" Text="或者使用自己的 Whisper GGML 模型"/>
+                    <TextBlock x:Name="WhisperModelTitle" Margin="0,14,0,0" FontSize="12" FontWeight="SemiBold" Text="Whisper GGML 模型（仅 Whisper 引擎使用）"/>
                     <Grid Margin="0,7,0,12"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                         <TextBox x:Name="ModelPathBox" Height="42"/>
                         <Button Grid.Column="1" Margin="8,0,0,0" Padding="16,7" Style="{StaticResource SecondaryButtonStyle}" Content="浏览文件" Click="BrowseModel_Click"/>
