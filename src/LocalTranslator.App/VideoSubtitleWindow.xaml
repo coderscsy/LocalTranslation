@@ -8,7 +8,7 @@
         <StackPanel>
             <TextBlock FontSize="25" FontWeight="SemiBold" Text="视频对话实时翻译"/>
             <TextBlock Margin="0,5,0,0" Foreground="{StaticResource MutedTextBrush}"
-                       Text="采集当前输出设备的系统声音，Whisper 本地识别人物对话，再由当前翻译 Provider 生成字幕。"/>
+                       Text="采集当前输出设备的系统声音，本地 ASR 识别人物对话，再由当前翻译 Provider 生成字幕。"/>
         </StackPanel>
         <ScrollViewer Grid.Row="1" Margin="0,18,0,14"
                       Focusable="False"
@@ -26,7 +26,7 @@
                         <StackPanel>
                             <TextBlock FontSize="14" FontWeight="SemiBold" Text="语音识别引擎"/>
                             <TextBlock Margin="0,3,0,0" FontSize="11" Foreground="{StaticResource MutedTextBrush}"
-                                       Text="默认推荐 SenseVoice Small；Whisper GGML 作为内置 fallback。"/>
+                                       Text="默认使用 Meetily Parakeet 识别英语视频；中日语可切换 SenseVoice，Whisper 作为 fallback。"/>
                         </StackPanel>
                         <Border Grid.Column="1" Padding="10,5" VerticalAlignment="Center" Background="#FFF7E8" CornerRadius="12">
                             <TextBlock x:Name="DefaultModelStatusText" FontSize="11" FontWeight="SemiBold" Foreground="#B54708" Text="未安装"/>
@@ -40,7 +40,7 @@
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="260"/>
+                            <ColumnDefinition Width="330"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="160"/>
                         </Grid.ColumnDefinitions>
@@ -50,7 +50,7 @@
                                       ItemsSource="{Binding AsrEngines}"
                                       SelectionChanged="AsrEngine_SelectionChanged"/>
                         </StackPanel>
-                        <StackPanel Grid.Column="1">
+                        <StackPanel x:Name="SenseVoiceEndpointPanel" Grid.Column="1">
                             <TextBlock FontSize="12" FontWeight="SemiBold" Text="SenseVoice / FunASR 本地服务地址"/>
                             <TextBox x:Name="SenseVoiceUrlBox" Margin="0,7,0,0" Height="42"
                                      Text="http://127.0.0.1:8899/v1"
@@ -60,18 +60,20 @@
                                 Padding="12,0" Style="{StaticResource SecondaryButtonStyle}"
                                 Content="测试 ASR 服务" Click="TestAsrService_Click"/>
                         <WrapPanel Grid.Row="1" Grid.Column="0" Margin="0,10,12,0" VerticalAlignment="Center">
-                            <CheckBox x:Name="EnableSenseVoiceCheck" IsChecked="True" Content="启用 SenseVoice"
+                            <CheckBox x:Name="EnableParakeetCheck" IsChecked="True" Content="启用 Parakeet"
+                                      Checked="AsrEngineAvailability_Changed" Unchecked="AsrEngineAvailability_Changed"/>
+                            <CheckBox x:Name="EnableSenseVoiceCheck" Margin="14,0,0,0" IsChecked="True" Content="启用 SenseVoice"
                                       Checked="AsrEngineAvailability_Changed" Unchecked="AsrEngineAvailability_Changed"/>
                             <CheckBox x:Name="EnableWhisperCheck" Margin="14,0,0,0" IsChecked="True" Content="启用 Whisper"
                                       Checked="AsrEngineAvailability_Changed" Unchecked="AsrEngineAvailability_Changed"/>
                         </WrapPanel>
-                        <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0">
+                        <StackPanel x:Name="SenseVoiceModelPanel" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0">
                             <TextBlock FontSize="12" FontWeight="SemiBold" Text="SenseVoice / FunASR 模型名"/>
                             <TextBox x:Name="SenseVoiceModelBox" Margin="0,7,0,0" Height="42"
                                      Text="sensevoice"
                                      ToolTip="填写 FunASR/OpenAI-compatible ASR 暴露的模型名，例如 fun-asr-nano、SenseVoiceSmall 或你的自定义模型名。"/>
                         </StackPanel>
-                        <Grid Grid.Row="2" Grid.ColumnSpan="3" Margin="0,10,0,0">
+                        <Grid x:Name="AsrServiceCommandGrid" Grid.Row="2" Grid.ColumnSpan="3" Margin="0,10,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -152,7 +154,7 @@
                     </Border>
 
                     <TextBlock x:Name="WhisperModelTitle" Margin="0,14,0,0" FontSize="12" FontWeight="SemiBold" Text="Whisper GGML 模型（仅 Whisper 引擎使用）"/>
-                    <Grid Margin="0,7,0,12"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <Grid x:Name="WhisperModelGrid" Margin="0,7,0,12"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                         <TextBox x:Name="ModelPathBox" Height="42"/>
                         <Button Grid.Column="1" Margin="8,0,0,0" Padding="16,7" Style="{StaticResource SecondaryButtonStyle}" Content="浏览文件" Click="BrowseModel_Click"/>
                     </Grid>

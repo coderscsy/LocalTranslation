@@ -7,6 +7,7 @@
   <ItemGroup>
     <PackageReference Include="LLamaSharp" Version="0.27.0" />
     <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.27.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.27.1" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="OpenccNetLib" Version="1.6.0" />
     <PackageReference Include="RapidOcrNet" Version="2.0.0" ExcludeAssets="build" />

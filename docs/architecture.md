@@ -17,7 +17,7 @@ Provider Router
 ## 分层
 
 - `LocalTranslator.Core`：语言、自动检测、翻译及字幕数据模型、抽象接口。
-- `LocalTranslator.Infrastructure`：OCR、屏幕与音频采集、SenseVoice/FunASR ASR API、Whisper fallback、LLamaSharp、Provider、安全配置和 SRT。
+- `LocalTranslator.Infrastructure`：OCR、屏幕与音频采集、Meetily Parakeet ONNX、SenseVoice/FunASR ASR API、Whisper fallback、LLamaSharp、Provider、安全配置和 SRT。
 - `LocalTranslator.App`：WPF 主界面、模型编辑器、Provider 设置、视频字幕控制台和字幕叠加窗。
 
 ## 关键约束
@@ -31,9 +31,10 @@ Provider Router
 - Chat Completions 请求先完整序列化为 UTF-8 `StringContent` 并携带明确的 `Content-Length`，兼容不接受流式 `JsonContent` 的自定义桥接服务。
 - 默认离线翻译模型是软件托管的 TranslateGemma 4B Q4_K_M，注册表与模型文件分离，模型文件可卸载后重新安装。
 - 视频字幕使用系统输出设备的全部声音，分段识别会产生数秒延迟。
-- ASR 引擎可切换：默认推荐 SenseVoice Small，经本地或局域网 FunASR/OpenAI-compatible ASR 服务 `/v1/audio/transcriptions` 识别；Whisper GGML 作为内置 fallback。
+- ASR 引擎可切换：默认使用由 Meetily 解码流程适配而来的 Parakeet TDT V3 INT8 进程内 ONNX 引擎识别英语/欧洲语言；SenseVoice 处理中文、日语和混说场景；Whisper GGML 作为内置 fallback。
+- Meetily Parakeet 模型由 `SpeechModelManager` 下载到数据盘，逐文件校验长度；取消或失败会清理 `.download` 临时文件。`VideoSubtitleService.StopAsync` 会 Dispose 三个 ONNX Session，避免停止后继续持有模型。
 - Whisper fallback 模型由 `SpeechModelManager` 下载到应用数据目录，并在安装前校验文件长度与 SHA-256；失败或取消时清理临时文件。
-- 实时字幕按 WASAPI 设备真实混音格式采集，经立体声转单声道和 WDL 重采样后统一为 16 kHz PCM；使用低延时静音触发切片、约 160ms 重叠、静音/低置信度过滤和容量为 2 的丢旧保新队列。
+- 实时字幕按 WASAPI 设备真实混音格式采集，经立体声转单声道和 WDL 重采样后统一为 16 kHz PCM；不同 ASR 使用独立切片阈值和滚动重叠，静音/低置信度结果会被过滤。音频通道容量为 32 并使用背压等待，不再通过 `DropOldest` 静默漏掉语音。
 - ASR 输出先进入语义缓冲：连续短片段即时更新原文，但只有遇到停顿、时间或长度阈值才提交给翻译模型，避免碎片句被断章误译。
 - 语音识别与 Provider 翻译采用独立有界队列：先显示识别原文，再异步补齐译文，慢速远程模型不会阻塞后续 Whisper 分段。
 - 视频翻译 Provider/模型独立于普通文字翻译配置；模型发现优先选择 `gemma-4-26b-a4b-it-mlx`，再回退普通 `gemma-4-26b-a4b-it`。`TranslationWindowManager` 以锁保护当前 ASR 流和最近三句完整原文，默认使用通用视频/直播协议，并提供游戏/电竞场景提示协议。
@@ -45,7 +46,7 @@ Provider Router
 
 ## 后续质量项
 
-- 音频设备选择、Silero VAD、重叠窗口文本去重与可选 CUDA Toolkit 安装
+- 音频设备选择、Silero VAD、Parakeet 可选 DirectML/CUDA 后端与性能基准
 - SenseVoice ONNX 直连 runtime、CPU/GPU 后端选择与更多 ASR 模型规格
 - 专用翻译模型模板预设、术语表、长文本分段和质量基准
 - 发布包、自包含构建、断网与多显示器验收

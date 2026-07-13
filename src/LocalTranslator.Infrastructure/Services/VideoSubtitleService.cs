@@ -18,6 +18,10 @@ namespace LocalTranslator.Infrastructure.Services;
 
 public sealed class VideoSubtitleService(ITranslationService translationService, IAppLogger logger) : IAsyncDisposable
 {
+    private const double ParakeetMinimumChunkSeconds = 1.8;
+    private const double ParakeetMaximumChunkSeconds = 4.8;
+    private const double ParakeetTailSilenceSeconds = 0.45;
+    private const double ParakeetOverlapSeconds = 0.85;
     private const double SenseVoiceMinimumChunkSeconds = 1.8;
     private const double SenseVoiceMaximumChunkSeconds = 4.8;
     private const double SenseVoiceTailSilenceSeconds = 0.55;
@@ -41,6 +45,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     private Task? _worker;
     private Task[] _translationWorkers = [];
     private WhisperFactory? _factory;
+    private MeetilyParakeetRecognizer? _parakeet;
     private readonly HttpClient _asrHttpClient = new() { Timeout = TimeSpan.FromSeconds(90) };
     private double _resampleByteRemainder;
     private TimeSpan _nextChunkStart;
@@ -73,6 +78,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     public async Task StartAsync(
         SpeechRecognitionEngine recognitionEngine,
         string whisperModelPath,
+        string parakeetModelDirectory,
         string senseVoiceBaseUrl,
         string senseVoiceModel,
         SupportedLanguage source,
@@ -84,6 +90,8 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         _recognitionEngine = recognitionEngine;
         if (_recognitionEngine == SpeechRecognitionEngine.WhisperGgml && !File.Exists(whisperModelPath))
             throw new OfflineEngineException("请选择存在的 Whisper GGML 模型文件。");
+        if (_recognitionEngine == SpeechRecognitionEngine.MeetilyParakeet)
+            SpeechModelManager.ValidateParakeetModel(parakeetModelDirectory);
         if (_recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall)
             _senseVoiceEndpoint = BuildTranscriptionEndpoint(senseVoiceBaseUrl);
         else
@@ -110,6 +118,9 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         _factory = _recognitionEngine == SpeechRecognitionEngine.WhisperGgml
             ? WhisperFactory.FromPath(whisperModelPath)
             : null;
+        _parakeet = _recognitionEngine == SpeechRecognitionEngine.MeetilyParakeet
+            ? new MeetilyParakeetRecognizer(parakeetModelDirectory)
+            : null;
         _cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         // Loopback audio must be captured in the Windows device mix format (usually
         // 48 kHz IEEE-float stereo). Treating those bytes as 16 kHz PCM16 corrupts
@@ -124,9 +135,14 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             .ToArray();
         _capture.StartRecording();
         logger.Info($"Loopback capture started. DeviceFormat={_capture.WaveFormat}; WhisperFormat={WhisperWaveFormat}.");
-        StatusChanged?.Invoke(this, _recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall
-            ? $"SenseVoice Small 识别中：使用 {CurrentMaximumChunkSeconds:F1} 秒上下文切片并保留词首词尾。"
-            : $"Whisper 识别中：使用 {CurrentMaximumChunkSeconds:F1} 秒上下文切片，结果不会伪装成 SenseVoice。");
+        StatusChanged?.Invoke(this, _recognitionEngine switch
+        {
+            SpeechRecognitionEngine.MeetilyParakeet =>
+                $"Meetily Parakeet 识别中：进程内 ONNX 推理，使用 {CurrentMaximumChunkSeconds:F1} 秒滚动上下文。",
+            SpeechRecognitionEngine.SenseVoiceSmall =>
+                $"SenseVoice Small 识别中：使用 {CurrentMaximumChunkSeconds:F1} 秒上下文切片并保留词首词尾。",
+            _ => $"Whisper 识别中：使用 {CurrentMaximumChunkSeconds:F1} 秒上下文切片，结果不会伪装成 SenseVoice。"
+        });
     }
 
     private static async Task<bool> IsEndpointReachableAsync(Uri endpoint, CancellationToken cancellationToken)
@@ -173,6 +189,8 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         _resampleByteRemainder = 0;
         _factory?.Dispose();
         _factory = null;
+        _parakeet?.Dispose();
+        _parakeet = null;
         _cancellation?.Dispose();
         _cancellation = null;
         StatusChanged?.Invoke(this, "视频字幕已停止。");
@@ -284,6 +302,11 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
 
     private async Task ProcessChunksAsync(CancellationToken cancellationToken)
     {
+        if (_recognitionEngine == SpeechRecognitionEngine.MeetilyParakeet)
+        {
+            await ProcessParakeetChunksAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
         if (_recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall)
         {
             await ProcessSenseVoiceChunksAsync(cancellationToken).ConfigureAwait(false);
@@ -291,6 +314,43 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         }
 
         await ProcessWhisperChunksAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ProcessParakeetChunksAsync(CancellationToken cancellationToken)
+    {
+        var recognizer = _parakeet ?? throw new OfflineEngineException("Meetily Parakeet 模型尚未加载。");
+        await foreach (var chunk in _chunks.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        {
+            try
+            {
+                StatusChanged?.Invoke(this, "正在使用 Meetily Parakeet 识别人物对话…");
+                var stopwatch = Stopwatch.StartNew();
+                var result = await recognizer.TranscribeAsync(chunk.Pcm, cancellationToken).ConfigureAwait(false);
+                var sourceText = result.Text.Trim();
+                if (!string.IsNullOrWhiteSpace(sourceText) && !IsSubtitleArtifact(sourceText))
+                {
+                    var resolvedSource = _source == SupportedLanguage.AutoDetect
+                        ? TextLanguageDetector.Detect(sourceText) ?? SupportedLanguage.English
+                        : _source;
+                    var displayedSource = _source == SupportedLanguage.ChineseSimplified
+                        ? ChineseTextNormalizer.ToSimplified(sourceText)
+                        : sourceText;
+                    AppendRecognizedText(sourceText, displayedSource, resolvedSource,
+                        chunk.Start, chunk.Start + chunk.Duration);
+                    logger.Info($"Meetily Parakeet speech recognized. Start={chunk.Start}, SourceChars={sourceText.Length}.");
+                }
+
+                if (chunk.IsSpeechBoundary) FlushPendingUtteranceIfReady();
+                stopwatch.Stop();
+                StatusChanged?.Invoke(this,
+                    $"监听中 · Parakeet 本段处理 {stopwatch.Elapsed.TotalSeconds:F1} 秒 · 等待下一段对话。 ");
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                logger.Error("Meetily Parakeet subtitle chunk failed.", exception);
+                StatusChanged?.Invoke(this, $"Parakeet 识别失败：{exception.Message}");
+            }
+        }
     }
 
     private async Task ProcessWhisperChunksAsync(CancellationToken cancellationToken)
@@ -697,25 +757,33 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             chunkStart + TimeSpan.FromTicks(endTicks));
     }
 
-    private double CurrentMinimumChunkSeconds =>
-        _recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall
-            ? SenseVoiceMinimumChunkSeconds
-            : WhisperMinimumChunkSeconds;
+    private double CurrentMinimumChunkSeconds => _recognitionEngine switch
+    {
+        SpeechRecognitionEngine.MeetilyParakeet => ParakeetMinimumChunkSeconds,
+        SpeechRecognitionEngine.SenseVoiceSmall => SenseVoiceMinimumChunkSeconds,
+        _ => WhisperMinimumChunkSeconds
+    };
 
-    private double CurrentMaximumChunkSeconds =>
-        _recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall
-            ? SenseVoiceMaximumChunkSeconds
-            : WhisperMaximumChunkSeconds;
+    private double CurrentMaximumChunkSeconds => _recognitionEngine switch
+    {
+        SpeechRecognitionEngine.MeetilyParakeet => ParakeetMaximumChunkSeconds,
+        SpeechRecognitionEngine.SenseVoiceSmall => SenseVoiceMaximumChunkSeconds,
+        _ => WhisperMaximumChunkSeconds
+    };
 
-    private double CurrentTailSilenceSeconds =>
-        _recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall
-            ? SenseVoiceTailSilenceSeconds
-            : WhisperTailSilenceSeconds;
+    private double CurrentTailSilenceSeconds => _recognitionEngine switch
+    {
+        SpeechRecognitionEngine.MeetilyParakeet => ParakeetTailSilenceSeconds,
+        SpeechRecognitionEngine.SenseVoiceSmall => SenseVoiceTailSilenceSeconds,
+        _ => WhisperTailSilenceSeconds
+    };
 
-    private double CurrentOverlapSeconds =>
-        _recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall
-            ? SenseVoiceOverlapSeconds
-            : WhisperOverlapSeconds;
+    private double CurrentOverlapSeconds => _recognitionEngine switch
+    {
+        SpeechRecognitionEngine.MeetilyParakeet => ParakeetOverlapSeconds,
+        SpeechRecognitionEngine.SenseVoiceSmall => SenseVoiceOverlapSeconds,
+        _ => WhisperOverlapSeconds
+    };
 
     private static Channel<RecognizedSegment> CreateTranslationChannel(int capacity) =>
         Channel.CreateBounded<RecognizedSegment>(new BoundedChannelOptions(Math.Max(2, capacity))

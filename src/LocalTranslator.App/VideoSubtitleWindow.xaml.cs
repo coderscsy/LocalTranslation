@@ -19,7 +19,7 @@ public partial class VideoSubtitleWindow : Window
 {
     private const string PreferredVideoModel = "gemma-4-26b-a4b-it-mlx";
     private const int CurrentOverlayLayoutVersion = 4;
-    private const int CurrentAsrConfigurationVersion = 1;
+    private const int CurrentAsrConfigurationVersion = 2;
     private const string DefaultAsrStartCommand = "funasr-server --host 127.0.0.1 --port 8899 --device cpu --model sensevoice";
     private readonly VideoSubtitleService _service;
     private readonly VideoTranslationSessionService _translationSession = new();
@@ -80,7 +80,11 @@ public partial class VideoSubtitleWindow : Window
         SaveSettings();
         RefreshDefaultModelStatus();
         RefreshAsrEngineUi();
-        Loaded += async (_, _) => await RefreshAsrDependencyUiAsync();
+        Loaded += async (_, _) =>
+        {
+            if ((AsrEngineCombo.SelectedItem as AsrEngineChoice)?.Engine == SpeechRecognitionEngine.SenseVoiceSmall)
+                await RefreshAsrDependencyUiAsync();
+        };
         Closing += VideoSubtitleWindow_Closing;
         Closed += (_, _) =>
         {
@@ -95,7 +99,8 @@ public partial class VideoSubtitleWindow : Window
     public IReadOnlyList<LanguageItem> TargetLanguages { get; }
     public IReadOnlyList<AsrEngineChoice> AsrEngines { get; } =
     [
-        new(SpeechRecognitionEngine.SenseVoiceSmall, "SenseVoice Small（推荐，开始翻译时自动启动）"),
+        new(SpeechRecognitionEngine.MeetilyParakeet, "Meetily Parakeet V3（英语视频默认，无需服务）"),
+        new(SpeechRecognitionEngine.SenseVoiceSmall, "SenseVoice Small（中/日语，自动启动服务）"),
         new(SpeechRecognitionEngine.WhisperGgml, "Whisper GGML（内置 fallback）")
     ];
     public ObservableCollection<SubtitleRow> Segments { get; } = [];
@@ -123,9 +128,12 @@ public partial class VideoSubtitleWindow : Window
         if (dialog.ShowDialog(this) == true) ModelPathBox.Text = dialog.FileName;
     }
 
-    private void AsrEngine_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private async void AsrEngine_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         RefreshAsrEngineUi();
+        if (_settingsLoaded &&
+            (AsrEngineCombo.SelectedItem as AsrEngineChoice)?.Engine == SpeechRecognitionEngine.SenseVoiceSmall)
+            await RefreshAsrDependencyUiAsync();
         if (_settingsLoaded) SaveSettings();
     }
 
@@ -144,6 +152,10 @@ public partial class VideoSubtitleWindow : Window
             UninstallDefaultModelButton is null ||
             SenseVoiceUrlBox is null ||
             SenseVoiceModelBox is null ||
+            SenseVoiceEndpointPanel is null ||
+            SenseVoiceModelPanel is null ||
+            AsrServiceCommandGrid is null ||
+            WhisperModelGrid is null ||
             TestAsrButton is null ||
             AsrStartCommandBox is null ||
             ResetAsrCommandButton is null ||
@@ -160,14 +172,16 @@ public partial class VideoSubtitleWindow : Window
         }
 
         var engine = (AsrEngineCombo.SelectedItem as AsrEngineChoice)?.Engine
-                     ?? SpeechRecognitionEngine.SenseVoiceSmall;
+                     ?? SpeechRecognitionEngine.MeetilyParakeet;
         if (!IsAsrEngineEnabled(engine))
         {
-            var fallback = EnableSenseVoiceCheck.IsChecked == true
-                ? SpeechRecognitionEngine.SenseVoiceSmall
-                : EnableWhisperCheck.IsChecked == true
-                    ? SpeechRecognitionEngine.WhisperGgml
-                    : engine;
+            var fallback = EnableParakeetCheck.IsChecked == true
+                ? SpeechRecognitionEngine.MeetilyParakeet
+                : EnableSenseVoiceCheck.IsChecked == true
+                    ? SpeechRecognitionEngine.SenseVoiceSmall
+                    : EnableWhisperCheck.IsChecked == true
+                        ? SpeechRecognitionEngine.WhisperGgml
+                        : engine;
             if (fallback != engine)
             {
                 AsrEngineCombo.SelectedItem = AsrEngines.First(item => item.Engine == fallback);
@@ -175,29 +189,43 @@ public partial class VideoSubtitleWindow : Window
             }
         }
 
-        var anyAsrEnabled = EnableSenseVoiceCheck.IsChecked == true || EnableWhisperCheck.IsChecked == true;
+        var anyAsrEnabled = EnableParakeetCheck.IsChecked == true ||
+                            EnableSenseVoiceCheck.IsChecked == true ||
+                            EnableWhisperCheck.IsChecked == true;
+        var useParakeet = engine == SpeechRecognitionEngine.MeetilyParakeet;
+        var useSenseVoice = engine == SpeechRecognitionEngine.SenseVoiceSmall;
         var useWhisper = engine == SpeechRecognitionEngine.WhisperGgml;
         WhisperModelTitle.Opacity = useWhisper ? 1 : 0.45;
+        WhisperModelTitle.Visibility = useWhisper ? Visibility.Visible : Visibility.Collapsed;
+        WhisperModelGrid.Visibility = useWhisper ? Visibility.Visible : Visibility.Collapsed;
         ModelPathBox.IsEnabled = useWhisper && !_running;
         DefaultModelPathText.Opacity = useWhisper ? 1 : 0.45;
-        InstallDefaultModelButton.IsEnabled = useWhisper && EnableWhisperCheck.IsChecked == true;
-        UninstallDefaultModelButton.IsEnabled = useWhisper && EnableWhisperCheck.IsChecked == true;
-        SenseVoiceUrlBox.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && !_running;
-        SenseVoiceModelBox.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && !_running;
-        TestAsrButton.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && EnableSenseVoiceCheck.IsChecked == true && !_running;
-        AsrStartCommandBox.IsEnabled = !_running;
-        ResetAsrCommandButton.IsEnabled = !_running;
-        InstallAsrDependenciesButton.IsEnabled = !_asrDependenciesInstalled && !_checkingAsrDependencies;
+        InstallDefaultModelButton.IsEnabled = (useParakeet || useWhisper) && !_running;
+        UninstallDefaultModelButton.IsEnabled = (useParakeet || useWhisper) && !_running;
+        SenseVoiceUrlBox.IsEnabled = useSenseVoice && !_running;
+        SenseVoiceModelBox.IsEnabled = useSenseVoice && !_running;
+        SenseVoiceEndpointPanel.Visibility = useSenseVoice ? Visibility.Visible : Visibility.Collapsed;
+        SenseVoiceModelPanel.Visibility = useSenseVoice ? Visibility.Visible : Visibility.Collapsed;
+        AsrServiceCommandGrid.Visibility = useSenseVoice ? Visibility.Visible : Visibility.Collapsed;
+        TestAsrButton.Visibility = useSenseVoice ? Visibility.Visible : Visibility.Collapsed;
+        TestAsrButton.IsEnabled = useSenseVoice && EnableSenseVoiceCheck.IsChecked == true && !_running;
+        AsrStartCommandBox.IsEnabled = useSenseVoice && !_running;
+        ResetAsrCommandButton.IsEnabled = useSenseVoice && !_running;
+        InstallAsrDependenciesButton.IsEnabled = useSenseVoice && !_asrDependenciesInstalled && !_checkingAsrDependencies;
+        StartAsrServerButton.IsEnabled = useSenseVoice && !_running;
         InstallAsrDependenciesButton.Content = _checkingAsrDependencies
             ? "正在检查…"
             : _asrDependenciesInstalled ? "依赖已安装" : "安装依赖";
         if (!_running) StartButton.IsEnabled = anyAsrEnabled;
-        DefaultModelStatusText.Text = engine == SpeechRecognitionEngine.SenseVoiceSmall
-            ? "推荐默认"
-            : _speechModelManager.IsDefaultModelInstalled ? "已安装 · 当前默认" : "未安装";
-        SetAsrStatus(engine == SpeechRecognitionEngine.SenseVoiceSmall
-            ? "当前 ASR：SenseVoice Small。点击“开始翻译”后软件会自动启动并加载 G 盘模型。"
-            : "\u5f53\u524d ASR\uff1aWhisper GGML\u3002\u53ef\u4f7f\u7528\u5185\u7f6e\u9ed8\u8ba4\u6a21\u578b\u6216\u81ea\u5df1\u7684 GGML \u6a21\u578b\u3002");
+        RefreshDefaultModelStatus();
+        SetAsrStatus(engine switch
+        {
+            SpeechRecognitionEngine.MeetilyParakeet =>
+                "当前 ASR：Meetily Parakeet V3。英语/欧洲语言准确率高，进程内运行，不需要启动 Python 服务。",
+            SpeechRecognitionEngine.SenseVoiceSmall =>
+                "当前 ASR：SenseVoice Small。适合中文、日语和中英混说；开始翻译时自动启动本地服务。",
+            _ => "当前 ASR：Whisper GGML。可使用内置默认模型或自己的 GGML 模型。"
+        });
     }
 
     private void SetAsrStatus(string message)
@@ -208,6 +236,7 @@ public partial class VideoSubtitleWindow : Window
 
     private bool IsAsrEngineEnabled(SpeechRecognitionEngine engine) => engine switch
     {
+        SpeechRecognitionEngine.MeetilyParakeet => EnableParakeetCheck?.IsChecked == true,
         SpeechRecognitionEngine.SenseVoiceSmall => EnableSenseVoiceCheck?.IsChecked == true,
         SpeechRecognitionEngine.WhisperGgml => EnableWhisperCheck?.IsChecked == true,
         _ => false
@@ -853,10 +882,18 @@ public partial class VideoSubtitleWindow : Window
         });
         try
         {
-            await _speechModelManager.InstallDefaultAsync(progress, _modelDownloadCancellation.Token);
-            ModelPathBox.Text = _speechModelManager.DefaultModelPath;
+            var engine = ((AsrEngineChoice)AsrEngineCombo.SelectedItem).Engine;
+            if (engine == SpeechRecognitionEngine.MeetilyParakeet)
+                await _speechModelManager.InstallParakeetAsync(progress, _modelDownloadCancellation.Token);
+            else
+            {
+                await _speechModelManager.InstallDefaultAsync(progress, _modelDownloadCancellation.Token);
+                ModelPathBox.Text = _speechModelManager.DefaultModelPath;
+            }
             SaveSettings();
-            StatusText.Text = "默认 Whisper 多语言模型安装完成，可以开始视频字幕。";
+            StatusText.Text = engine == SpeechRecognitionEngine.MeetilyParakeet
+                ? "Meetily Parakeet V3 模型安装完成，可以直接开始英语视频翻译。"
+                : "默认 Whisper 多语言模型安装完成，可以开始视频字幕。";
         }
         catch (OperationCanceledException)
         {
@@ -885,29 +922,48 @@ public partial class VideoSubtitleWindow : Window
             MessageBox.Show(this, "请先停止视频字幕，再卸载正在使用的模型。", "模型正在使用", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        if (MessageBox.Show(this, "确定卸载默认 Whisper 模型？\n将删除软件托管目录中的约 181 MiB 模型文件。",
+        var engine = ((AsrEngineChoice)AsrEngineCombo.SelectedItem).Engine;
+        var parakeet = engine == SpeechRecognitionEngine.MeetilyParakeet;
+        var message = parakeet
+            ? "确定卸载 Meetily Parakeet V3？\n将删除软件托管目录中的约 640 MiB 模型文件。"
+            : "确定卸载默认 Whisper 模型？\n将删除软件托管目录中的约 181 MiB 模型文件。";
+        if (MessageBox.Show(this, message,
                 "卸载默认语音模型", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-        _speechModelManager.UninstallDefault();
+        if (parakeet) _speechModelManager.UninstallParakeet();
+        else _speechModelManager.UninstallDefault();
         if (!string.IsNullOrWhiteSpace(ModelPathBox.Text) &&
             Path.GetFullPath(ModelPathBox.Text.Trim()).Equals(
                 Path.GetFullPath(_speechModelManager.DefaultModelPath), StringComparison.OrdinalIgnoreCase))
             ModelPathBox.Text = string.Empty;
         SaveSettings();
         RefreshDefaultModelStatus();
-        StatusText.Text = "默认 Whisper 模型已卸载；你可以重新安装或选择自己的模型。";
+        StatusText.Text = parakeet
+            ? "Meetily Parakeet 模型已卸载；可随时重新下载。"
+            : "默认 Whisper 模型已卸载；你可以重新安装或选择自己的模型。";
     }
 
     private void RefreshDefaultModelStatus()
     {
-        var installed = _speechModelManager.IsDefaultModelInstalled;
-        DefaultModelPathText.Text = _speechModelManager.DefaultModelPath;
+        if (AsrEngineCombo?.SelectedItem is not AsrEngineChoice choice) return;
+        var parakeet = choice.Engine == SpeechRecognitionEngine.MeetilyParakeet;
+        var managedModel = parakeet || choice.Engine == SpeechRecognitionEngine.WhisperGgml;
+        var installed = parakeet
+            ? _speechModelManager.IsParakeetModelInstalled
+            : choice.Engine == SpeechRecognitionEngine.WhisperGgml && _speechModelManager.IsDefaultModelInstalled;
+        DefaultModelPathText.Text = parakeet
+            ? _speechModelManager.ParakeetModelDirectory
+            : choice.Engine == SpeechRecognitionEngine.WhisperGgml
+                ? _speechModelManager.DefaultModelPath
+                : "SenseVoice 模型由本地服务管理；此处无需重复下载。";
         DefaultModelStatusText.Text = installed ? "已安装 · 当前默认" : "未安装";
         DefaultModelStatusText.Foreground = installed
             ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(2, 122, 72))
             : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(181, 71, 8));
-        InstallDefaultModelButton.Visibility = installed ? Visibility.Collapsed : Visibility.Visible;
-        UninstallDefaultModelButton.Visibility = installed ? Visibility.Visible : Visibility.Collapsed;
-        if (installed && (string.IsNullOrWhiteSpace(ModelPathBox.Text) ||
+        InstallDefaultModelButton.Content = parakeet ? "下载 Meetily 模型" : "下载安装默认模型";
+        UninstallDefaultModelButton.Content = parakeet ? "卸载 Meetily 模型" : "卸载默认模型";
+        InstallDefaultModelButton.Visibility = managedModel && !installed ? Visibility.Visible : Visibility.Collapsed;
+        UninstallDefaultModelButton.Visibility = managedModel && installed ? Visibility.Visible : Visibility.Collapsed;
+        if (!parakeet && installed && (string.IsNullOrWhiteSpace(ModelPathBox.Text) ||
                           !File.Exists(ModelPathBox.Text) ||
                           Path.GetFullPath(ModelPathBox.Text.Trim()).Equals(
                               Path.GetFullPath(_speechModelManager.LegacyModelPath), StringComparison.OrdinalIgnoreCase)))
@@ -952,6 +1008,10 @@ public partial class VideoSubtitleWindow : Window
                     throw new InvalidOperationException(
                         "SenseVoice ASR 服务自动启动失败。请查看页面中的启动错误；软件不会再静默改用 Whisper。");
             }
+            if (asrEngine == SpeechRecognitionEngine.MeetilyParakeet &&
+                source is SupportedLanguage.ChineseSimplified or SupportedLanguage.Japanese)
+                throw new InvalidOperationException(
+                    "Meetily Parakeet V3 不支持中文或日语语音。请切换 SenseVoice Small；英语视频可选择 English 或自动检测。");
 
             _latestOverlayStart = TimeSpan.MinValue;
             Segments.Clear();
@@ -972,6 +1032,7 @@ public partial class VideoSubtitleWindow : Window
             await _service.StartAsync(
                 asrEngine,
                 ModelPathBox.Text.Trim(),
+                _speechModelManager.ParakeetModelDirectory,
                 SenseVoiceUrlBox.Text.Trim(),
                 SenseVoiceModelBox.Text.Trim(),
                 source,
@@ -1336,10 +1397,14 @@ public partial class VideoSubtitleWindow : Window
             AsrStartCommandBox.Text = string.IsNullOrWhiteSpace(settings.AsrStartCommand)
                 ? DefaultAsrStartCommand
                 : NormalizeSavedAsrStartCommand(settings.AsrStartCommand);
+            EnableParakeetCheck.IsChecked = settings.EnableParakeet;
             EnableSenseVoiceCheck.IsChecked = settings.EnableSenseVoice;
             EnableWhisperCheck.IsChecked = settings.EnableWhisper;
+            var savedEngine = settings.AsrConfigurationVersion < CurrentAsrConfigurationVersion
+                ? SpeechRecognitionEngine.MeetilyParakeet
+                : settings.AsrEngine;
             AsrEngineCombo.SelectedItem = AsrEngines.FirstOrDefault(item =>
-                                             item.Engine == settings.AsrEngine)
+                                             item.Engine == savedEngine)
                                          ?? AsrEngines[0];
             SourceFontSlider.Value = migrateCompactOverlay ? 17 : settings.SourceFontSize;
             TranslationFontSlider.Value = migrateCompactOverlay ? 24 : settings.TranslationFontSize;
@@ -1385,11 +1450,12 @@ public partial class VideoSubtitleWindow : Window
         File.WriteAllText(_settingsPath, JsonSerializer.Serialize(new VideoSettings
         {
             AsrEngine = (AsrEngineCombo.SelectedItem as AsrEngineChoice)?.Engine
-                        ?? SpeechRecognitionEngine.SenseVoiceSmall,
+                        ?? SpeechRecognitionEngine.MeetilyParakeet,
             WhisperModelPath = ModelPathBox.Text.Trim(),
             SenseVoiceBaseUrl = SenseVoiceUrlBox.Text.Trim(),
             SenseVoiceModel = SenseVoiceModelBox.Text.Trim(),
             AsrStartCommand = AsrStartCommandBox.Text.Trim(),
+            EnableParakeet = EnableParakeetCheck.IsChecked == true,
             EnableSenseVoice = EnableSenseVoiceCheck.IsChecked == true,
             EnableWhisper = EnableWhisperCheck.IsChecked == true,
             SourceFontSize = SourceFontSlider.Value,
@@ -1427,11 +1493,12 @@ public partial class VideoSubtitleWindow : Window
 
     private sealed class VideoSettings
     {
-        public SpeechRecognitionEngine AsrEngine { get; init; } = SpeechRecognitionEngine.SenseVoiceSmall;
+        public SpeechRecognitionEngine AsrEngine { get; init; } = SpeechRecognitionEngine.MeetilyParakeet;
         public string? WhisperModelPath { get; init; }
         public string SenseVoiceBaseUrl { get; init; } = "http://127.0.0.1:8899/v1";
         public string SenseVoiceModel { get; init; } = "sensevoice";
         public string AsrStartCommand { get; init; } = DefaultAsrStartCommand;
+        public bool EnableParakeet { get; init; } = true;
         public bool EnableSenseVoice { get; init; } = true;
         public bool EnableWhisper { get; init; } = true;
         public double SourceFontSize { get; init; } = 17;
