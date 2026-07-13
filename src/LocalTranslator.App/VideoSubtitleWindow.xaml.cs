@@ -467,6 +467,9 @@ public partial class VideoSubtitleWindow : Window
                 return true;
             }
 
+            if (await WaitForExistingAsrServerAsync(token))
+                return true;
+
             var dependencyCheck = await CheckAsrDependenciesAsync();
             _asrDependenciesInstalled = dependencyCheck.IsComplete;
             if (!dependencyCheck.IsComplete)
@@ -482,7 +485,8 @@ public partial class VideoSubtitleWindow : Window
                 throw new InvalidOperationException("ASR 服务启动命令不能为空。");
 
             lock (_asrServerOutputLock) _asrServerOutput.Clear();
-            _managedAsrServerProcess = StartBackgroundCommand(command, CaptureAsrServerOutput, _dataRoot);
+            var startedProcess = StartBackgroundCommand(command, CaptureAsrServerOutput, _dataRoot);
+            _managedAsrServerProcess = startedProcess;
             SetAsrStatus(IsSenseVoiceModelCached()
                 ? "正在从 G 盘加载已下载的 SenseVoice 模型，无需再次下载…"
                 : "首次使用正在下载 SenseVoice 模型到 G 盘缓存；后续启动将直接复用…");
@@ -491,17 +495,27 @@ public partial class VideoSubtitleWindow : Window
             while (DateTimeOffset.Now < deadline)
             {
                 token.ThrowIfCancellationRequested();
-                if (_managedAsrServerProcess.HasExited)
-                    throw new InvalidOperationException(
-                        $"ASR 服务进程已退出（代码 {_managedAsrServerProcess.ExitCode}）：{GetAsrServerOutputTail()}");
-
                 await Task.Delay(2000, token);
                 if (await TryTestAsrEndpointAsync(token))
                 {
-                    SetAsrStatus("ASR 服务启动成功，可以开始视频字幕。");
-                    StartAsrServerButton.Content = "停止 ASR 服务";
+                    if (startedProcess.HasExited)
+                    {
+                        startedProcess.Dispose();
+                        _managedAsrServerProcess = null;
+                        SetAsrStatus("检测到 8899 端口已有可用的 SenseVoice 服务，已直接复用，不再重复启动。");
+                        StartAsrServerButton.Content = "ASR 服务已运行";
+                    }
+                    else
+                    {
+                        SetAsrStatus("ASR 服务启动成功，可以开始视频字幕。");
+                        StartAsrServerButton.Content = "停止 ASR 服务";
+                    }
                     return true;
                 }
+
+                if (startedProcess.HasExited)
+                    throw new InvalidOperationException(
+                        $"ASR 服务进程已退出（代码 {startedProcess.ExitCode}）：{GetAsrServerOutputTail()}");
 
                 var latestOutput = GetAsrServerOutputTail(260, latestLineOnly: true);
                 if (!string.IsNullOrWhiteSpace(latestOutput))
@@ -591,16 +605,45 @@ public partial class VideoSubtitleWindow : Window
     {
         try
         {
-            await VideoSubtitleService.TestSenseVoiceEndpointAsync(
-                SenseVoiceUrlBox.Text.Trim(),
-                SenseVoiceModelBox.Text.Trim(),
-                cancellationToken);
-            return true;
+            return await VideoSubtitleService.ProbeSenseVoiceEndpointAsync(
+                SenseVoiceUrlBox.Text.Trim(), cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
             return false;
         }
+    }
+
+    private async Task<bool> WaitForExistingAsrServerAsync(CancellationToken cancellationToken)
+    {
+        var baseUrl = SenseVoiceUrlBox.Text.Trim();
+        if (!await VideoSubtitleService.IsSenseVoicePortOpenAsync(baseUrl, cancellationToken))
+            return false;
+
+        SetAsrStatus("检测到 ASR 端口已被占用，正在确认现有 SenseVoice 服务，避免重复启动……");
+        var deadline = DateTimeOffset.Now.AddSeconds(45);
+        while (DateTimeOffset.Now < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await TryTestAsrEndpointAsync(cancellationToken))
+            {
+                SetAsrStatus("现有 SenseVoice 服务已就绪，已直接复用。");
+                StartAsrServerButton.Content = "ASR 服务已运行";
+                return true;
+            }
+
+            await Task.Delay(1500, cancellationToken);
+            if (!await VideoSubtitleService.IsSenseVoicePortOpenAsync(baseUrl, cancellationToken))
+                return false;
+        }
+
+        throw new InvalidOperationException(
+            $"{baseUrl} 的端口已被其他进程占用，但未检测到兼容的 SenseVoice 服务。" +
+            "请关闭占用该端口的程序，或把服务地址和启动命令改为同一个空闲端口。");
     }
 
     private async Task<string> NormalizeAsrStartCommandAsync(string command)

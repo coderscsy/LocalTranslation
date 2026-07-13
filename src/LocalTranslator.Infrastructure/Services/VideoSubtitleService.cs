@@ -159,6 +159,10 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             await client.ConnectAsync(endpoint.Host, port, cancellationToken).ConfigureAwait(false);
             return true;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch
         {
             return false;
@@ -546,6 +550,46 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         return string.IsNullOrWhiteSpace(text)
             ? "连接成功，静音测试音频返回空文本。"
             : text;
+    }
+
+    public static async Task<bool> ProbeSenseVoiceEndpointAsync(
+        string baseUrl,
+        CancellationToken cancellationToken = default)
+    {
+        var transcriptionEndpoint = BuildTranscriptionEndpoint(baseUrl);
+        if (!await IsEndpointReachableAsync(transcriptionEndpoint, cancellationToken).ConfigureAwait(false))
+            return false;
+
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        var candidates = new[]
+        {
+            new Uri(transcriptionEndpoint, "/health"),
+            new Uri(transcriptionEndpoint, "/v1/models")
+        };
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                using var response = await httpClient.GetAsync(candidate, cancellationToken).ConfigureAwait(false);
+                if (response.IsSuccessStatusCode) return true;
+            }
+            catch (Exception exception) when (
+                !cancellationToken.IsCancellationRequested &&
+                exception is HttpRequestException or TaskCanceledException)
+            {
+                // Try the next compatibility endpoint. A listening but unrelated
+                // process must not be mistaken for the configured ASR service.
+            }
+        }
+
+        return false;
+    }
+
+    public static Task<bool> IsSenseVoicePortOpenAsync(
+        string baseUrl,
+        CancellationToken cancellationToken = default)
+    {
+        return IsEndpointReachableAsync(BuildTranscriptionEndpoint(baseUrl), cancellationToken);
     }
 
     private static Uri BuildTranscriptionEndpoint(string baseUrl)

@@ -283,20 +283,38 @@ using (var asrListener = new HttpListener())
     asrListener.Start();
     var asrServerTask = Task.Run(async () =>
     {
-        var context = await asrListener.GetContextAsync();
-        if (context.Request.Url?.AbsolutePath != "/v1/audio/transcriptions" ||
-            !string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+        for (var requestIndex = 0; requestIndex < 2; requestIndex++)
         {
-            throw new InvalidOperationException("ASR endpoint was not called as an OpenAI-compatible transcription request.");
-        }
+            var context = await asrListener.GetContextAsync();
+            var requestPath = context.Request.Url?.AbsolutePath;
+            byte[] bytes;
+            if (requestPath == "/health" &&
+                string.Equals(context.Request.HttpMethod, "GET", StringComparison.OrdinalIgnoreCase))
+            {
+                bytes = Encoding.UTF8.GetBytes("{\"status\":\"ok\",\"models_loaded\":[\"sensevoice\"]}");
+            }
+            else if (requestPath == "/v1/audio/transcriptions" &&
+                     string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                bytes = Encoding.UTF8.GetBytes("{\"text\":\"hello\"}");
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"Unexpected ASR request: {context.Request.HttpMethod} {requestPath}");
+            }
 
-        var bytes = Encoding.UTF8.GetBytes("{\"text\":\"hello\"}");
-        context.Response.StatusCode = 200;
-        context.Response.ContentType = "application/json";
-        context.Response.ContentLength64 = bytes.Length;
-        await context.Response.OutputStream.WriteAsync(bytes);
-        context.Response.Close();
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "application/json";
+            context.Response.ContentLength64 = bytes.Length;
+            await context.Response.OutputStream.WriteAsync(bytes);
+            context.Response.Close();
+        }
     });
+
+    var asrHealthy = await VideoSubtitleService.ProbeSenseVoiceEndpointAsync($"{asrPrefix}v1");
+    if (!asrHealthy)
+        throw new InvalidOperationException("SenseVoice health endpoint probe failed.");
 
     var asrResult = await VideoSubtitleService.TestSenseVoiceEndpointAsync(
         $"{asrPrefix}v1",
@@ -304,6 +322,14 @@ using (var asrListener = new HttpListener())
     await asrServerTask;
     if (asrResult != "hello")
         throw new InvalidOperationException("OpenAI-compatible ASR endpoint smoke test failed.");
+}
+
+var liveAsrUrl = Environment.GetEnvironmentVariable("LOCALTRANSLATOR_LIVE_ASR_URL");
+if (!string.IsNullOrWhiteSpace(liveAsrUrl))
+{
+    if (!await VideoSubtitleService.ProbeSenseVoiceEndpointAsync(liveAsrUrl))
+        throw new InvalidOperationException($"Live SenseVoice endpoint probe failed: {liveAsrUrl}");
+    Console.WriteLine($"LIVE_ASR_READY={liveAsrUrl}");
 }
 
 var translationWindow = new TranslationWindowManager();
