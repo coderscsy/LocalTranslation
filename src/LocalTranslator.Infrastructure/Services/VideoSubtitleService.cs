@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text.Json;
 using System.Threading.Channels;
 using LocalTranslator.Core.Abstractions;
@@ -52,6 +53,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     public event EventHandler<string>? StatusChanged;
 
     public bool IsRunning => _capture is not null;
+    public SpeechRecognitionEngine ActiveRecognitionEngine => _recognitionEngine;
 
     public void SetTargetLanguage(SupportedLanguage target)
     {
@@ -60,7 +62,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         StatusChanged?.Invoke(this, $"后续字幕目标语言已切换为：{target.ToDisplayName()}。");
     }
 
-    public Task StartAsync(
+    public async Task StartAsync(
         SpeechRecognitionEngine recognitionEngine,
         string whisperModelPath,
         string senseVoiceBaseUrl,
@@ -81,6 +83,24 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         _senseVoiceModel = string.IsNullOrWhiteSpace(senseVoiceModel)
             ? "fun-asr-nano"
             : senseVoiceModel.Trim();
+        if (_recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall &&
+            _senseVoiceEndpoint is not null &&
+            !await IsEndpointReachableAsync(_senseVoiceEndpoint, cancellationToken).ConfigureAwait(false))
+        {
+            if (File.Exists(whisperModelPath))
+            {
+                logger.Info($"SenseVoice endpoint {_senseVoiceEndpoint} is not reachable. Falling back to Whisper GGML.");
+                StatusChanged?.Invoke(this,
+                    "\u672c\u5730 SenseVoice/FunASR \u670d\u52a1\u672a\u542f\u52a8\u6216\u7aef\u53e3\u4e0d\u53ef\u8fbe\uff0c\u5df2\u81ea\u52a8\u5207\u6362\u5230 Whisper GGML \u7ee7\u7eed\u8bc6\u522b\u3002");
+                _recognitionEngine = SpeechRecognitionEngine.WhisperGgml;
+                _senseVoiceEndpoint = null;
+            }
+            else
+            {
+                throw new OfflineEngineException(
+                    "\u65e0\u6cd5\u8fde\u63a5 SenseVoice/FunASR \u672c\u5730 ASR \u670d\u52a1\uff0c\u800c\u4e14\u6ca1\u6709\u53ef\u56de\u9000\u7684 Whisper \u6a21\u578b\u3002\u8bf7\u542f\u52a8 ASR \u670d\u52a1\u6216\u5207\u6362\u5230 Whisper GGML\u3002");
+            }
+        }
         _source = source;
         _target = target;
         _chunks = CreateAudioChannel();
@@ -110,7 +130,23 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         StatusChanged?.Invoke(this, _recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall
             ? $"SenseVoice Small 识别中：本地 ASR 服务负责转写，最长 {MaximumChunkSeconds:F1} 秒切片。"
             : $"Whisper 识别中：静音触发切片，最长 {MaximumChunkSeconds:F1} 秒送识别，译文晚到也会回填到字幕。");
-        return Task.CompletedTask;
+    }
+
+    private static async Task<bool> IsEndpointReachableAsync(Uri endpoint, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var port = endpoint.IsDefaultPort
+                ? endpoint.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ? 443 : 80
+                : endpoint.Port;
+            using var client = new TcpClient();
+            await client.ConnectAsync(endpoint.Host, port, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public async Task StopAsync()
@@ -385,6 +421,9 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     {
         var endpoint = BuildTranscriptionEndpoint(baseUrl);
         var modelName = string.IsNullOrWhiteSpace(model) ? "fun-asr-nano" : model.Trim();
+        if (!await IsEndpointReachableAsync(endpoint, cancellationToken).ConfigureAwait(false))
+            throw new OfflineEngineException(
+                "\u672c\u5730 SenseVoice/FunASR \u670d\u52a1\u672a\u542f\u52a8\u6216\u7aef\u53e3\u4e0d\u53ef\u8fbe\uff0c\u8bf7\u5148\u542f\u52a8 ASR \u670d\u52a1\uff0c\u6216\u5207\u6362\u5230 Whisper GGML\u3002");
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         await using var wav = CreateWaveStream(new byte[WhisperWaveFormat.AverageBytesPerSecond / 2]);
         using var content = new MultipartFormDataContent();

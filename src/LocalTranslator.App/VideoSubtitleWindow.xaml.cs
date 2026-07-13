@@ -328,6 +328,11 @@ public partial class VideoSubtitleWindow : Window
                 source,
                 target,
                 concurrency);
+            if (_service.ActiveRecognitionEngine != asrEngine)
+            {
+                AsrEngineCombo.SelectedItem = AsrEngines.First(item => item.Engine == _service.ActiveRecognitionEngine);
+                SetAsrStatus("\u672c\u5730 SenseVoice/FunASR \u670d\u52a1\u4e0d\u53ef\u7528\uff0c\u5df2\u81ea\u52a8\u5207\u6362\u5230 Whisper GGML\u3002");
+            }
             _running = true;
             StartButton.Content = "停止翻译";
             RefreshAsrEngineUi();
@@ -664,9 +669,7 @@ public partial class VideoSubtitleWindow : Window
                 : new VideoSettings();
             var migrateCompactOverlay = settings.OverlayLayoutVersion < CurrentOverlayLayoutVersion;
             ModelPathBox.Text = settings.WhisperModelPath ?? string.Empty;
-            SenseVoiceUrlBox.Text = string.IsNullOrWhiteSpace(settings.SenseVoiceBaseUrl)
-                ? "http://127.0.0.1:8899/v1"
-                : settings.SenseVoiceBaseUrl;
+            SenseVoiceUrlBox.Text = NormalizeSenseVoiceBaseUrl(settings.SenseVoiceBaseUrl);
             SenseVoiceModelBox.Text = string.IsNullOrWhiteSpace(settings.SenseVoiceModel)
                 ? "fun-asr-nano"
                 : settings.SenseVoiceModel;
@@ -740,6 +743,16 @@ public partial class VideoSubtitleWindow : Window
             VideoSceneId = (VideoSceneCombo.SelectedItem as VideoSceneChoice)?.Id ?? "general",
             OverlayLayoutVersion = CurrentOverlayLayoutVersion
         }));
+    }
+
+    private static string NormalizeSenseVoiceBaseUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "http://127.0.0.1:8899/v1";
+        var trimmed = value.Trim();
+        return trimmed.Equals("http://127.0.0.1:10095/v1", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("http://localhost:10095/v1", StringComparison.OrdinalIgnoreCase)
+            ? "http://127.0.0.1:8899/v1"
+            : trimmed;
     }
 
     private sealed class VideoSettings
