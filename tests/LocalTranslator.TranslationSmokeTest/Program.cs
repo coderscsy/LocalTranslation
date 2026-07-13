@@ -84,6 +84,45 @@ if (TextLanguageDetector.Detect("你是谁") != SupportedLanguage.ChineseSimplif
     throw new InvalidOperationException("Automatic language detection smoke test failed.");
 }
 
+const string mixedChineseEnglish = "这个 API endpoint requires authentication 才能继续";
+if (TextLanguageDetector.DetectForTranslation(mixedChineseEnglish) != SupportedLanguage.AutoDetect ||
+    !TextLanguageDetector.RequiresTranslation(
+        mixedChineseEnglish,
+        SupportedLanguage.ChineseSimplified,
+        SupportedLanguage.ChineseSimplified) ||
+    TextLanguageDetector.RequiresTranslation(
+        "这是纯中文视频字幕",
+        SupportedLanguage.ChineseSimplified,
+        SupportedLanguage.ChineseSimplified))
+{
+    throw new InvalidOperationException("Mixed Chinese-English translation routing smoke test failed.");
+}
+
+if (SpeechRecognitionRouter.Resolve(
+        SupportedLanguage.AutoDetect,
+        SpeechRecognitionEngine.MeetilyParakeet,
+        senseVoiceEnabled: true,
+        whisperEnabled: true) != SpeechRecognitionEngine.SenseVoiceSmall ||
+    SpeechRecognitionRouter.Resolve(
+        SupportedLanguage.English,
+        SpeechRecognitionEngine.MeetilyParakeet,
+        senseVoiceEnabled: true,
+        whisperEnabled: true) != SpeechRecognitionEngine.MeetilyParakeet ||
+    SpeechRecognitionRouter.Resolve(
+        SupportedLanguage.ChineseSimplified,
+        SpeechRecognitionEngine.MeetilyParakeet,
+        senseVoiceEnabled: false,
+        whisperEnabled: true) != SpeechRecognitionEngine.WhisperGgml)
+{
+    throw new InvalidOperationException("ASR language-aware routing smoke test failed.");
+}
+
+var mixedFragments = SemanticSubtitleBuffer.MergeFragments(
+    ["这个 API endpoint", "requires authentication", "才能继续"],
+    SupportedLanguage.AutoDetect);
+if (mixedFragments != "这个 API endpoint requires authentication才能继续")
+    throw new InvalidOperationException("Mixed-language subtitle spacing smoke test failed.");
+
 var simplified = ChineseTextNormalizer.ToSimplified("輕易講所有繁體字幕");
 Console.WriteLine($"SIMPLIFIED={simplified}");
 if (simplified != "轻易讲所有繁体字幕")

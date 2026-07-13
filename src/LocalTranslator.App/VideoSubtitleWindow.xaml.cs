@@ -1013,12 +1013,23 @@ public partial class VideoSubtitleWindow : Window
             ConfigureVideoTranslationService();
             var source = ((LanguageItem)SourceCombo.SelectedItem).Value;
             var target = ((LanguageItem)TargetCombo.SelectedItem).Value;
-            if (source != SupportedLanguage.AutoDetect && source == target)
-                throw new InvalidOperationException("源语言和目标语言不能相同。英文视频请选择 English → 简体中文，或使用自动检测 → 简体中文。");
             var concurrency = VideoConcurrencyCombo.SelectedItem is int selectedConcurrency
                 ? selectedConcurrency
                 : 3;
-            var asrEngine = ((AsrEngineChoice)AsrEngineCombo.SelectedItem).Engine;
+            var selectedEngine = ((AsrEngineChoice)AsrEngineCombo.SelectedItem).Engine;
+            var asrEngine = SpeechRecognitionRouter.Resolve(
+                source,
+                selectedEngine,
+                EnableSenseVoiceCheck.IsChecked == true,
+                EnableWhisperCheck.IsChecked == true);
+            var automaticallyRouted = asrEngine != selectedEngine;
+            if (asrEngine != selectedEngine)
+            {
+                AsrEngineCombo.SelectedItem = AsrEngines.First(item => item.Engine == asrEngine);
+                SetAsrStatus(asrEngine == SpeechRecognitionEngine.SenseVoiceSmall
+                    ? "检测到自动/中日语源语言，本次已自动改用 SenseVoice，支持中文、日语和中英混说。"
+                    : "检测到当前语言不适合 Parakeet，本次已自动改用多语言 Whisper。");
+            }
             if (!IsAsrEngineEnabled(asrEngine))
                 throw new InvalidOperationException("当前 ASR 引擎已禁用，请先启用或切换到可用引擎。");
 
@@ -1026,8 +1037,22 @@ public partial class VideoSubtitleWindow : Window
             {
                 SetAsrStatus("正在自动启动并检查 SenseVoice ASR 服务…");
                 if (!await StartAsrServerAsync())
-                    throw new InvalidOperationException(
-                        "SenseVoice ASR 服务自动启动失败。请查看页面中的启动错误；软件不会再静默改用 Whisper。");
+                {
+                    if (automaticallyRouted &&
+                        EnableWhisperCheck.IsChecked == true &&
+                        File.Exists(ModelPathBox.Text.Trim()))
+                    {
+                        asrEngine = SpeechRecognitionEngine.WhisperGgml;
+                        AsrEngineCombo.SelectedItem = AsrEngines.First(
+                            item => item.Engine == SpeechRecognitionEngine.WhisperGgml);
+                        SetAsrStatus("SenseVoice 自动启动失败，已明确切换到本地多语言 Whisper；不会使用英语专用 Parakeet 识别中文。");
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            "SenseVoice ASR 服务自动启动失败，且没有可用的 Whisper 模型。请查看页面中的启动错误。");
+                    }
+                }
             }
             if (asrEngine == SpeechRecognitionEngine.MeetilyParakeet &&
                 source is SupportedLanguage.ChineseSimplified or SupportedLanguage.Japanese)
@@ -1227,17 +1252,6 @@ public partial class VideoSubtitleWindow : Window
     private void OverlayOnTargetLanguageChanged(object? sender, SupportedLanguage target)
     {
         if (_syncingTargetLanguage) return;
-        var source = SourceCombo.SelectedItem is LanguageItem sourceItem
-            ? sourceItem.Value
-            : SupportedLanguage.AutoDetect;
-        if (source != SupportedLanguage.AutoDetect && source == target)
-        {
-            StatusText.Text = "目标语言不能与源语言相同，请先把源语言改为自动检测或选择其他目标语言。";
-            if (TargetCombo.SelectedItem is LanguageItem currentTarget)
-                _overlay?.SetTargetLanguage(currentTarget.Value);
-            return;
-        }
-
         var targetItem = TargetLanguages.FirstOrDefault(item => item.Value == target);
         if (targetItem is null) return;
         ApplyTargetLanguage(targetItem, updateCombo: true);
@@ -1257,7 +1271,7 @@ public partial class VideoSubtitleWindow : Window
             if (updateCombo) TargetCombo.SelectedItem = targetItem;
             _service.SetTargetLanguage(targetItem.Value);
             _overlay?.SetTargetLanguage(targetItem.Value);
-            StatusText.Text = $"后续视频字幕将翻译为：{targetItem.DisplayName}。";
+            StatusText.Text = $"后续视频字幕将显示为：{targetItem.DisplayName}。同语言语音会直接生成字幕。";
             SaveSettings();
         }
         finally

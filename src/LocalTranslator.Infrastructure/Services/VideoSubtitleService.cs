@@ -373,7 +373,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                 if (!string.IsNullOrWhiteSpace(sourceText) && !IsSubtitleArtifact(sourceText))
                 {
                     var resolvedSource = _source == SupportedLanguage.AutoDetect
-                        ? TextLanguageDetector.Detect(sourceText) ?? SupportedLanguage.English
+                        ? TextLanguageDetector.DetectForTranslation(sourceText) ?? SupportedLanguage.English
                         : _source;
                     var displayedSource = _source == SupportedLanguage.ChineseSimplified
                         ? ChineseTextNormalizer.ToSimplified(sourceText)
@@ -436,7 +436,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                         continue;
                     }
                     var resolvedSource = _source == SupportedLanguage.AutoDetect
-                        ? TextLanguageDetector.Detect(sourceText) ?? SupportedLanguage.English
+                        ? TextLanguageDetector.DetectForTranslation(sourceText) ?? SupportedLanguage.English
                         : _source;
                     var displayedSource = _source == SupportedLanguage.ChineseSimplified
                         ? ChineseTextNormalizer.ToSimplified(sourceText)
@@ -473,7 +473,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                     !IsSubtitleArtifact(sourceText))
                 {
                     var resolvedSource = _source == SupportedLanguage.AutoDetect
-                        ? TextLanguageDetector.Detect(sourceText) ?? SupportedLanguage.English
+                        ? TextLanguageDetector.DetectForTranslation(sourceText) ?? SupportedLanguage.English
                         : _source;
                     var displayedSource = _source == SupportedLanguage.ChineseSimplified
                         ? ChineseTextNormalizer.ToSimplified(sourceText)
@@ -596,7 +596,9 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         if (_pendingUtterance is not null)
         {
             var gap = start - _pendingUtterance.End;
-            if (_pendingUtterance.SourceLanguage != sourceLanguage || gap > TimeSpan.FromSeconds(0.9))
+            var fixedLanguageChanged = _source != SupportedLanguage.AutoDetect &&
+                                       _pendingUtterance.SourceLanguage != sourceLanguage;
+            if (fixedLanguageChanged || gap > TimeSpan.FromSeconds(0.9))
                 FlushPendingUtterance();
         }
 
@@ -639,6 +641,10 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             }
         }
 
+        if (_source == SupportedLanguage.AutoDetect)
+            _pendingUtterance.SourceLanguage =
+                TextLanguageDetector.DetectForTranslation(_pendingUtterance.SourceText) ?? sourceLanguage;
+
         if (replacePendingText)
             _translationWindow.ReplaceStream(_pendingUtterance.SourceText);
         else
@@ -650,7 +656,19 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             string.Empty,
             _pendingUtterance.Sequence));
 
-        QueuePreviewTranslation(_pendingUtterance);
+        if (RequiresTranslation(_pendingUtterance))
+        {
+            QueuePreviewTranslation(_pendingUtterance);
+        }
+        else
+        {
+            SegmentReady?.Invoke(this, new SubtitleSegment(
+                _pendingUtterance.Start,
+                _pendingUtterance.End,
+                _pendingUtterance.DisplayedSource,
+                NormalizeForTarget(_pendingUtterance.SourceText, _target),
+                _pendingUtterance.Sequence));
+        }
 
         if (ShouldFlushPending(_pendingUtterance))
             FlushPendingUtterance();
@@ -668,7 +686,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
 
         _translationWindow.UpdateStream(sourceText);
 
-        if (pending.SourceLanguage == _target)
+        if (!RequiresTranslation(pending))
         {
             SegmentReady?.Invoke(this, new SubtitleSegment(
                 pending.Start,
@@ -703,7 +721,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
 
     private void QueuePreviewTranslation(PendingUtterance pending)
     {
-        if (pending.SourceLanguage == _target ||
+        if (!RequiresTranslation(pending) ||
             !ShouldRequestPreviewTranslation(pending.SourceText, pending.LastQueuedSource))
             return;
 
@@ -730,6 +748,12 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             pending.SourceLanguage,
             _translationWindow.HistoricalContext));
     }
+
+    private bool RequiresTranslation(PendingUtterance pending) =>
+        TextLanguageDetector.RequiresTranslation(
+            pending.SourceText,
+            pending.SourceLanguage,
+            _target);
 
     private static bool ShouldRequestPreviewTranslation(string sourceText, string lastQueuedSource)
     {
@@ -929,7 +953,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         public TimeSpan End { get; set; }
         public required string SourceText { get; set; }
         public required string DisplayedSource { get; set; }
-        public required SupportedLanguage SourceLanguage { get; init; }
+        public required SupportedLanguage SourceLanguage { get; set; }
         public string LastQueuedSource { get; set; } = string.Empty;
         public TimeSpan? CumulativeRevisionStart { get; set; }
         public string CumulativeSourcePrefix { get; set; } = string.Empty;

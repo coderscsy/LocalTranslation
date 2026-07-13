@@ -72,6 +72,13 @@ public static class SemanticSubtitleBuffer
         if (language is SupportedLanguage.ChineseSimplified or SupportedLanguage.Japanese)
             return $"{left}{right}";
 
+        if (language == SupportedLanguage.AutoDetect &&
+            (ContainsCjk(left) || ContainsCjk(right)))
+        {
+            var separator = NeedsAsciiWordSeparator(left[^1], right[0]) ? " " : string.Empty;
+            return $"{left}{separator}{right}";
+        }
+
         return NeedsNoSpaceBefore(right) || NeedsNoSpaceAfter(left)
             ? $"{left}{right}"
             : $"{left} {right}";
@@ -115,6 +122,16 @@ public static class SemanticSubtitleBuffer
 
     private static bool NeedsNoSpaceAfter(string text) =>
         text.Length > 0 && "([{（【「『".Contains(text[^1]);
+
+    private static bool NeedsAsciiWordSeparator(char left, char right) =>
+        left <= 0x7F && right <= 0x7F && char.IsLetterOrDigit(left) && char.IsLetterOrDigit(right);
+
+    private static bool ContainsCjk(string text) =>
+        text.EnumerateRunes().Any(rune => rune.Value is
+            >= 0x3040 and <= 0x30FF or
+            >= 0x31F0 and <= 0x31FF or
+            >= 0x3400 and <= 0x4DBF or
+            >= 0x4E00 and <= 0x9FFF);
 
     private static string TrimSoftSentenceEnding(string text) =>
         text.TrimEnd().TrimEnd('.', '。');

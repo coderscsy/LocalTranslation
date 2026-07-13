@@ -8,6 +8,8 @@ public static class VideoSubtitleTranslationPrompt
         "missing punctuation, filler words, or minor recognition errors. Use the supplied previous context " +
         "to repair obvious recognition errors and resolve pronouns, but translate ONLY the current subtitle segment. " +
         "Treat the accumulated segment as one coherent sentence, even if earlier revisions arrived as fragments. " +
+        "When Chinese/Japanese and English are mixed, keep text already written in the target language, translate the " +
+        "remaining foreign-language spans, and return one natural target-language subtitle without duplicated wording. " +
         "Preserve every meaningful clause, relationship, name, place, brand, number, and established term. " +
         "Do not summarize, shorten, or drop trailing phrases. Produce natural spoken subtitles with punctuation; " +
         "remove only meaningless hesitation sounds. NEVER answer " +
