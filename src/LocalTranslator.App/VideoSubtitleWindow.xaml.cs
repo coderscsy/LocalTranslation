@@ -403,6 +403,7 @@ public partial class VideoSubtitleWindow : Window
         finally
         {
             _checkingAsrDependencies = false;
+            RefreshDefaultModelStatus();
         }
     }
 
@@ -464,7 +465,15 @@ public partial class VideoSubtitleWindow : Window
             {
                 SetAsrStatus("ASR 服务已经可用。");
                 StartAsrServerButton.Content = "ASR 服务已运行";
+                RefreshDefaultModelStatus();
                 return true;
+            }
+
+            if (_managedAsrServerProcess is { HasExited: false })
+            {
+                SetAsrStatus("现有 ASR 进程可以连接但无法完成识别，正在自动重启……");
+                StopManagedAsrServer();
+                await Task.Delay(800, token);
             }
 
             if (await WaitForExistingAsrServerAsync(token))
@@ -510,6 +519,7 @@ public partial class VideoSubtitleWindow : Window
                         SetAsrStatus("ASR 服务启动成功，可以开始视频字幕。");
                         StartAsrServerButton.Content = "停止 ASR 服务";
                     }
+                    RefreshDefaultModelStatus();
                     return true;
                 }
 
@@ -605,8 +615,11 @@ public partial class VideoSubtitleWindow : Window
     {
         try
         {
-            return await VideoSubtitleService.ProbeSenseVoiceEndpointAsync(
-                SenseVoiceUrlBox.Text.Trim(), cancellationToken);
+            await VideoSubtitleService.TestSenseVoiceEndpointAsync(
+                SenseVoiceUrlBox.Text.Trim(),
+                SenseVoiceModelBox.Text.Trim(),
+                cancellationToken);
+            return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1013,15 +1026,20 @@ public partial class VideoSubtitleWindow : Window
         if (AsrEngineCombo?.SelectedItem is not AsrEngineChoice choice) return;
         var parakeet = choice.Engine == SpeechRecognitionEngine.MeetilyParakeet;
         var managedModel = parakeet || choice.Engine == SpeechRecognitionEngine.WhisperGgml;
+        var senseVoice = choice.Engine == SpeechRecognitionEngine.SenseVoiceSmall;
         var installed = parakeet
             ? _speechModelManager.IsParakeetModelInstalled
-            : choice.Engine == SpeechRecognitionEngine.WhisperGgml && _speechModelManager.IsDefaultModelInstalled;
+            : choice.Engine == SpeechRecognitionEngine.WhisperGgml
+                ? _speechModelManager.IsDefaultModelInstalled
+                : senseVoice && _asrDependenciesInstalled && IsSenseVoiceModelCached();
         DefaultModelPathText.Text = parakeet
             ? _speechModelManager.ParakeetModelDirectory
             : choice.Engine == SpeechRecognitionEngine.WhisperGgml
                 ? _speechModelManager.DefaultModelPath
                 : "SenseVoice 模型由本地服务管理；此处无需重复下载。";
-        DefaultModelStatusText.Text = installed ? "已安装 · 当前默认" : "未安装";
+        DefaultModelStatusText.Text = installed
+            ? senseVoice ? "服务与模型已就绪" : "已安装 · 当前默认"
+            : senseVoice ? "服务未就绪" : "未安装";
         DefaultModelStatusText.Foreground = installed
             ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(2, 122, 72))
             : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(181, 71, 8));

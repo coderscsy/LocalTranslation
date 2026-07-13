@@ -329,7 +329,10 @@ if (!string.IsNullOrWhiteSpace(liveAsrUrl))
 {
     if (!await VideoSubtitleService.ProbeSenseVoiceEndpointAsync(liveAsrUrl))
         throw new InvalidOperationException($"Live SenseVoice endpoint probe failed: {liveAsrUrl}");
-    Console.WriteLine($"LIVE_ASR_READY={liveAsrUrl}");
+    var liveAsrResult = await VideoSubtitleService.TestSenseVoiceEndpointAsync(
+        liveAsrUrl,
+        Environment.GetEnvironmentVariable("LOCALTRANSLATOR_LIVE_ASR_MODEL") ?? "sensevoice");
+    Console.WriteLine($"LIVE_ASR_READY={liveAsrUrl}; RESULT={liveAsrResult}");
 }
 
 var translationWindow = new TranslationWindowManager();
