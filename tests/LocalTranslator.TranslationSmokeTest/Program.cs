@@ -98,6 +98,17 @@ if (!VideoSubtitleService.IsSubtitleArtifact("(字幕:J Chong)") ||
     throw new InvalidOperationException("Subtitle hallucination filter smoke test failed.");
 }
 
+var clampedRecognitionRange = VideoSubtitleService.ClampRecognitionRange(
+    TimeSpan.FromSeconds(2.8),
+    TimeSpan.FromSeconds(2.8),
+    TimeSpan.Zero,
+    TimeSpan.FromSeconds(30));
+if (clampedRecognitionRange.Start != TimeSpan.FromSeconds(2.8) ||
+    clampedRecognitionRange.End != TimeSpan.FromSeconds(5.6))
+{
+    throw new InvalidOperationException("Whisper timestamp clamping smoke test failed.");
+}
+
 if (TranslationOutputValidator.IsValid("Where are we going?", "Where are we going?",
         SupportedLanguage.ChineseSimplified) ||
     TranslationOutputValidator.IsValid("Where are we going?", "Let's go home.",
@@ -170,6 +181,24 @@ for (var index = 0; index < rollingFinanceFragments.Length; index++)
     var shouldFlush = SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary(text, TimeSpan.FromSeconds(seconds));
     if (shouldFlush != (index == rollingFinanceFragments.Length - 1))
         throw new InvalidOperationException($"Rolling finance sentence was finalized at the wrong revision: {index}.");
+}
+
+var realSenseVoiceWindowFragments = new[]
+{
+    "following my completion of undergraduate studies i am driven by a strong passion",
+    "a strong passion to pursue further academic accomplishments in the field of finance"
+};
+var mergedSenseVoiceWindows = SemanticSubtitleBuffer.MergeFragments(
+    realSenseVoiceWindowFragments,
+    SupportedLanguage.English);
+const string expectedSenseVoiceWindows =
+    "following my completion of undergraduate studies i am driven by a strong passion to pursue further academic accomplishments in the field of finance";
+if (!mergedSenseVoiceWindows.Equals(expectedSenseVoiceWindows, StringComparison.Ordinal) ||
+    !SemanticSubtitleBuffer.ShouldFlushOnSpeechBoundary(
+        mergedSenseVoiceWindows,
+        TimeSpan.FromSeconds(9.2)))
+{
+    throw new InvalidOperationException("Real SenseVoice rolling-window merge smoke test failed.");
 }
 
 var correlatedSource = new SubtitleSegment(TimeSpan.Zero, TimeSpan.FromSeconds(2),

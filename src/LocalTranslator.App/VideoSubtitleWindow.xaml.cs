@@ -95,7 +95,7 @@ public partial class VideoSubtitleWindow : Window
     public IReadOnlyList<LanguageItem> TargetLanguages { get; }
     public IReadOnlyList<AsrEngineChoice> AsrEngines { get; } =
     [
-        new(SpeechRecognitionEngine.SenseVoiceSmall, "SenseVoice Small（推荐，需本地 FunASR 服务）"),
+        new(SpeechRecognitionEngine.SenseVoiceSmall, "SenseVoice Small（推荐，开始翻译时自动启动）"),
         new(SpeechRecognitionEngine.WhisperGgml, "Whisper GGML（内置 fallback）")
     ];
     public ObservableCollection<SubtitleRow> Segments { get; } = [];
@@ -196,7 +196,7 @@ public partial class VideoSubtitleWindow : Window
             ? "推荐默认"
             : _speechModelManager.IsDefaultModelInstalled ? "已安装 · 当前默认" : "未安装";
         SetAsrStatus(engine == SpeechRecognitionEngine.SenseVoiceSmall
-            ? "\u5f53\u524d ASR\uff1aSenseVoice Small\u3002\u8bf7\u786e\u8ba4\u672c\u5730 FunASR/OpenAI-compatible ASR \u670d\u52a1\u5df2\u542f\u52a8\u3002"
+            ? "当前 ASR：SenseVoice Small。点击“开始翻译”后软件会自动启动并加载 G 盘模型。"
             : "\u5f53\u524d ASR\uff1aWhisper GGML\u3002\u53ef\u4f7f\u7528\u5185\u7f6e\u9ed8\u8ba4\u6a21\u578b\u6216\u81ea\u5df1\u7684 GGML \u6a21\u578b\u3002");
     }
 
@@ -397,7 +397,7 @@ public partial class VideoSubtitleWindow : Window
         SetAsrStatus("ASR 启动命令已恢复为安全默认值。");
     }
 
-    private async Task StartAsrServerAsync()
+    private async Task<bool> StartAsrServerAsync()
     {
         StartAsrServerButton.IsEnabled = false;
         _asrServerStartCancellation?.Cancel();
@@ -412,7 +412,7 @@ public partial class VideoSubtitleWindow : Window
             {
                 SetAsrStatus("ASR 服务已经可用。");
                 StartAsrServerButton.Content = "ASR 服务已运行";
-                return;
+                return true;
             }
 
             var dependencyCheck = await CheckAsrDependenciesAsync();
@@ -431,7 +431,9 @@ public partial class VideoSubtitleWindow : Window
 
             lock (_asrServerOutputLock) _asrServerOutput.Clear();
             _managedAsrServerProcess = StartBackgroundCommand(command, CaptureAsrServerOutput, _dataRoot);
-            SetAsrStatus("ASR 服务正在启动；首次运行会下载约 936 MiB 的 SenseVoice 模型，请查看这里的实时进度…");
+            SetAsrStatus(IsSenseVoiceModelCached()
+                ? "正在从 G 盘加载已下载的 SenseVoice 模型，无需再次下载…"
+                : "首次使用正在下载 SenseVoice 模型到 G 盘缓存；后续启动将直接复用…");
 
             var deadline = DateTimeOffset.Now.AddMinutes(5);
             while (DateTimeOffset.Now < deadline)
@@ -446,7 +448,7 @@ public partial class VideoSubtitleWindow : Window
                 {
                     SetAsrStatus("ASR 服务启动成功，可以开始视频字幕。");
                     StartAsrServerButton.Content = "停止 ASR 服务";
-                    return;
+                    return true;
                 }
 
                 var latestOutput = GetAsrServerOutputTail(260, latestLineOnly: true);
@@ -458,15 +460,35 @@ public partial class VideoSubtitleWindow : Window
         }
         catch (OperationCanceledException)
         {
+            StopManagedAsrServer();
             SetAsrStatus("ASR 服务启动已取消。");
+            return false;
         }
         catch (Exception exception)
         {
+            StopManagedAsrServer();
             SetAsrStatus($"ASR 服务启动失败：{exception.Message}");
+            return false;
         }
         finally
         {
             StartAsrServerButton.IsEnabled = true;
+        }
+    }
+
+    private bool IsSenseVoiceModelCached()
+    {
+        var modelScopeRoot = Path.Combine(_dataRoot, "Cache", "modelscope", "models");
+        if (!Directory.Exists(modelScopeRoot)) return false;
+        try
+        {
+            return Directory.EnumerateFiles(modelScopeRoot, "model.pt", SearchOption.AllDirectories)
+                .Any(path => path.Contains("SenseVoiceSmall", StringComparison.OrdinalIgnoreCase) &&
+                             new FileInfo(path).Length > 100L * 1024 * 1024);
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -497,7 +519,10 @@ public partial class VideoSubtitleWindow : Window
         try
         {
             if (!_managedAsrServerProcess.HasExited)
+            {
                 _managedAsrServerProcess.Kill(entireProcessTree: true);
+                _managedAsrServerProcess.WaitForExit(5000);
+            }
         }
         catch
         {
@@ -903,15 +928,34 @@ public partial class VideoSubtitleWindow : Window
     private async void StartStop_Click(object sender, RoutedEventArgs e)
     {
         if (_running) { await StopAsync(); return; }
+        StartButton.IsEnabled = false;
+        StartButton.Content = "正在启动…";
         try
         {
             SaveSettings();
             ConfigureVideoTranslationService();
+            var source = ((LanguageItem)SourceCombo.SelectedItem).Value;
+            var target = ((LanguageItem)TargetCombo.SelectedItem).Value;
+            if (source != SupportedLanguage.AutoDetect && source == target)
+                throw new InvalidOperationException("源语言和目标语言不能相同。英文视频请选择 English → 简体中文，或使用自动检测 → 简体中文。");
+            var concurrency = VideoConcurrencyCombo.SelectedItem is int selectedConcurrency
+                ? selectedConcurrency
+                : 3;
+            var asrEngine = ((AsrEngineChoice)AsrEngineCombo.SelectedItem).Engine;
+            if (!IsAsrEngineEnabled(asrEngine))
+                throw new InvalidOperationException("当前 ASR 引擎已禁用，请先启用或切换到可用引擎。");
+
+            if (asrEngine == SpeechRecognitionEngine.SenseVoiceSmall)
+            {
+                SetAsrStatus("正在自动启动并检查 SenseVoice ASR 服务…");
+                if (!await StartAsrServerAsync())
+                    throw new InvalidOperationException(
+                        "SenseVoice ASR 服务自动启动失败。请查看页面中的启动错误；软件不会再静默改用 Whisper。");
+            }
+
             _latestOverlayStart = TimeSpan.MinValue;
             Segments.Clear();
             ExportButton.IsEnabled = false;
-            var source = ((LanguageItem)SourceCombo.SelectedItem).Value;
-            var target = ((LanguageItem)TargetCombo.SelectedItem).Value;
             if (OverlayCheck.IsChecked == true)
             {
                 _overlay = new SubtitleOverlayWindow(SourceFontSlider.Value, TranslationFontSlider.Value,
@@ -925,14 +969,6 @@ public partial class VideoSubtitleWindow : Window
                 _overlay.CloseRequested += OverlayOnCloseRequested;
                 _overlay.Show();
             }
-            if (source != SupportedLanguage.AutoDetect && source == target)
-                throw new InvalidOperationException("源语言和目标语言不能相同。英文视频请选择 English → 简体中文，或使用自动检测 → 简体中文。");
-            var concurrency = VideoConcurrencyCombo.SelectedItem is int selectedConcurrency
-                ? selectedConcurrency
-                : 3;
-            var asrEngine = ((AsrEngineChoice)AsrEngineCombo.SelectedItem).Engine;
-            if (!IsAsrEngineEnabled(asrEngine))
-                throw new InvalidOperationException("当前 ASR 引擎已禁用，请先启用或切换到可用引擎。");
             await _service.StartAsync(
                 asrEngine,
                 ModelPathBox.Text.Trim(),
@@ -941,19 +977,19 @@ public partial class VideoSubtitleWindow : Window
                 source,
                 target,
                 concurrency);
-            if (_service.ActiveRecognitionEngine != asrEngine)
-            {
-                AsrEngineCombo.SelectedItem = AsrEngines.First(item => item.Engine == _service.ActiveRecognitionEngine);
-                SetAsrStatus("\u672c\u5730 SenseVoice/FunASR \u670d\u52a1\u4e0d\u53ef\u7528\uff0c\u5df2\u81ea\u52a8\u5207\u6362\u5230 Whisper GGML\u3002");
-            }
             _running = true;
             StartButton.Content = "停止翻译";
+            StartButton.IsEnabled = true;
             RefreshAsrEngineUi();
             (Owner as MainWindow)?.MinimizeForSubtitle();
         }
         catch (Exception exception)
         {
             _overlay?.Close(); _overlay = null;
+            StopManagedAsrServer();
+            _translationSession.Reset();
+            StartButton.Content = "开始翻译";
+            StartButton.IsEnabled = true;
             MessageBox.Show(this, exception.Message, "无法启动视频字幕", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -970,9 +1006,13 @@ public partial class VideoSubtitleWindow : Window
         finally
         {
             _running = false;
+            StopManagedAsrServer();
+            StartAsrServerButton.Content = "启动 ASR 服务";
+            _translationSession.Reset();
             StartButton.Content = "开始翻译";
             StartButton.IsEnabled = true;
             RefreshAsrEngineUi();
+            SetAsrStatus("翻译已停止；由软件启动的 ASR 服务和模型内存已经释放。");
             _overlay?.Close(); _overlay = null;
             if (!_allowClose)
             {
@@ -1427,10 +1467,15 @@ public partial class VideoSubtitleWindow : Window
             (_service ?? throw new InvalidOperationException("视频翻译服务尚未配置。"))
             .TranslateAsync(request, cancellationToken);
 
-        public void Dispose()
+        public void Reset()
         {
             _service?.Dispose();
             _service = null;
+        }
+
+        public void Dispose()
+        {
+            Reset();
         }
     }
 }

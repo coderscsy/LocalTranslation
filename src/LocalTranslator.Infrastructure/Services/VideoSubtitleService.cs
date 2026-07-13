@@ -18,10 +18,14 @@ namespace LocalTranslator.Infrastructure.Services;
 
 public sealed class VideoSubtitleService(ITranslationService translationService, IAppLogger logger) : IAsyncDisposable
 {
-    private const double MinimumChunkSeconds = 0.72;
-    private const double MaximumChunkSeconds = 1.6;
-    private const double TailSilenceSeconds = 0.28;
-    private const double OverlapSeconds = 0.16;
+    private const double SenseVoiceMinimumChunkSeconds = 1.8;
+    private const double SenseVoiceMaximumChunkSeconds = 4.8;
+    private const double SenseVoiceTailSilenceSeconds = 0.55;
+    private const double SenseVoiceOverlapSeconds = 0.90;
+    private const double WhisperMinimumChunkSeconds = 1.2;
+    private const double WhisperMaximumChunkSeconds = 2.8;
+    private const double WhisperTailSilenceSeconds = 0.45;
+    private const double WhisperOverlapSeconds = 0.35;
     private static readonly WaveFormat WhisperWaveFormat = new(16000, 16, 1);
     private static readonly Regex SubtitleArtifactPattern = new(
         @"^\s*[\(\[（【<].{0,100}(?:字幕|subtitles?|captions?|translated\s+by|translation\s+by|synced\s+by|www\.).{0,100}[\)\]）】>]\s*[。.!！]?\s*$",
@@ -90,21 +94,8 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         if (_recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall &&
             _senseVoiceEndpoint is not null &&
             !await IsEndpointReachableAsync(_senseVoiceEndpoint, cancellationToken).ConfigureAwait(false))
-        {
-            if (File.Exists(whisperModelPath))
-            {
-                logger.Info($"SenseVoice endpoint {_senseVoiceEndpoint} is not reachable. Falling back to Whisper GGML.");
-                StatusChanged?.Invoke(this,
-                    "\u672c\u5730 SenseVoice/FunASR \u670d\u52a1\u672a\u542f\u52a8\u6216\u7aef\u53e3\u4e0d\u53ef\u8fbe\uff0c\u5df2\u81ea\u52a8\u5207\u6362\u5230 Whisper GGML \u7ee7\u7eed\u8bc6\u522b\u3002");
-                _recognitionEngine = SpeechRecognitionEngine.WhisperGgml;
-                _senseVoiceEndpoint = null;
-            }
-            else
-            {
-                throw new OfflineEngineException(
-                    "\u65e0\u6cd5\u8fde\u63a5 SenseVoice/FunASR \u672c\u5730 ASR \u670d\u52a1\uff0c\u800c\u4e14\u6ca1\u6709\u53ef\u56de\u9000\u7684 Whisper \u6a21\u578b\u3002\u8bf7\u542f\u52a8 ASR \u670d\u52a1\u6216\u5207\u6362\u5230 Whisper GGML\u3002");
-            }
-        }
+            throw new OfflineEngineException(
+                "无法连接所选 SenseVoice/FunASR 服务。为避免静默切换到低准确率引擎，本次翻译没有启动；请启动 ASR 服务后重试。");
         _source = source;
         _target = target;
         _chunks = CreateAudioChannel();
@@ -134,8 +125,8 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         _capture.StartRecording();
         logger.Info($"Loopback capture started. DeviceFormat={_capture.WaveFormat}; WhisperFormat={WhisperWaveFormat}.");
         StatusChanged?.Invoke(this, _recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall
-            ? $"SenseVoice Small 识别中：本地 ASR 服务负责转写，最长 {MaximumChunkSeconds:F1} 秒切片。"
-            : $"Whisper 识别中：静音触发切片，最长 {MaximumChunkSeconds:F1} 秒送识别，译文晚到也会回填到字幕。");
+            ? $"SenseVoice Small 识别中：使用 {CurrentMaximumChunkSeconds:F1} 秒上下文切片并保留词首词尾。"
+            : $"Whisper 识别中：使用 {CurrentMaximumChunkSeconds:F1} 秒上下文切片，结果不会伪装成 SenseVoice。");
     }
 
     private static async Task<bool> IsEndpointReachableAsync(Uri endpoint, CancellationToken cancellationToken)
@@ -229,9 +220,9 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         {
             _pcmBuffer.AddRange(converted.AsSpan(0, bytesRead).ToArray());
             var bufferedBytes = _pcmBuffer.Count;
-            var maxBytes = WhisperWaveFormat.AverageBytesPerSecond * MaximumChunkSeconds;
-            var minBytes = WhisperWaveFormat.AverageBytesPerSecond * MinimumChunkSeconds;
-            var hasTailSilence = bufferedBytes >= minBytes && IsTailSilent(_pcmBuffer, TailSilenceSeconds);
+            var maxBytes = WhisperWaveFormat.AverageBytesPerSecond * CurrentMaximumChunkSeconds;
+            var minBytes = WhisperWaveFormat.AverageBytesPerSecond * CurrentMinimumChunkSeconds;
+            var hasTailSilence = bufferedBytes >= minBytes && IsTailSilent(_pcmBuffer, CurrentTailSilenceSeconds);
             if (bufferedBytes >= maxBytes || hasTailSilence)
             {
                 FlushChunkLocked(hasTailSilence);
@@ -277,14 +268,18 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         var duration = TimeSpan.FromSeconds((double)pcm.Length / WhisperWaveFormat.AverageBytesPerSecond);
         var chunk = new AudioChunk(pcm, _nextChunkStart, duration, isSpeechBoundary);
         var overlapBytes = Math.Min(
-            (int)(WhisperWaveFormat.AverageBytesPerSecond * OverlapSeconds) & ~1,
+            (int)(WhisperWaveFormat.AverageBytesPerSecond * CurrentOverlapSeconds) & ~1,
             Math.Max(0, pcm.Length - WhisperWaveFormat.AverageBytesPerSecond));
         if (overlapBytes > 0)
             _pcmBuffer.AddRange(pcm.AsSpan(pcm.Length - overlapBytes, overlapBytes).ToArray());
         _nextChunkStart += TimeSpan.FromSeconds(
             (double)(pcm.Length - overlapBytes) / WhisperWaveFormat.AverageBytesPerSecond);
         if (IsSilent(pcm)) return;
-        _chunks.Writer.TryWrite(chunk);
+        if (!_chunks.Writer.TryWrite(chunk))
+        {
+            logger.Info("ASR audio queue reached its safety limit; the newest chunk could not be queued.");
+            StatusChanged?.Invoke(this, "ASR 处理速度持续落后，音频队列已满；请停止其他高负载程序后重试。");
+        }
     }
 
     private async Task ProcessChunksAsync(CancellationToken cancellationToken)
@@ -343,8 +338,8 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                     var displayedSource = _source == SupportedLanguage.ChineseSimplified
                         ? ChineseTextNormalizer.ToSimplified(sourceText)
                         : sourceText;
-                    var start = chunk.Start + result.Start;
-                    var end = result.End > result.Start ? chunk.Start + result.End : chunk.Start + chunk.Duration;
+                    var (start, end) = ClampRecognitionRange(
+                        chunk.Start, chunk.Duration, result.Start, result.End);
                     AppendRecognizedText(sourceText, displayedSource, resolvedSource, start, end);
                     logger.Info($"Video speech recognized. Start={start}, SourceChars={sourceText.Length}.");
                 }
@@ -679,12 +674,48 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     }
 
     private static Channel<AudioChunk> CreateAudioChannel() => Channel.CreateBounded<AudioChunk>(
-        new BoundedChannelOptions(2)
+        new BoundedChannelOptions(32)
         {
             SingleReader = true,
             SingleWriter = false,
-            FullMode = BoundedChannelFullMode.DropOldest
+            FullMode = BoundedChannelFullMode.Wait
         });
+
+    public static (TimeSpan Start, TimeSpan End) ClampRecognitionRange(
+        TimeSpan chunkStart,
+        TimeSpan chunkDuration,
+        TimeSpan recognizedStart,
+        TimeSpan recognizedEnd)
+    {
+        var durationTicks = Math.Max(0, chunkDuration.Ticks);
+        var startTicks = Math.Clamp(recognizedStart.Ticks, 0, durationTicks);
+        var endTicks = recognizedEnd > recognizedStart
+            ? Math.Clamp(recognizedEnd.Ticks, startTicks, durationTicks)
+            : durationTicks;
+        if (endTicks <= startTicks) endTicks = durationTicks;
+        return (chunkStart + TimeSpan.FromTicks(startTicks),
+            chunkStart + TimeSpan.FromTicks(endTicks));
+    }
+
+    private double CurrentMinimumChunkSeconds =>
+        _recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall
+            ? SenseVoiceMinimumChunkSeconds
+            : WhisperMinimumChunkSeconds;
+
+    private double CurrentMaximumChunkSeconds =>
+        _recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall
+            ? SenseVoiceMaximumChunkSeconds
+            : WhisperMaximumChunkSeconds;
+
+    private double CurrentTailSilenceSeconds =>
+        _recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall
+            ? SenseVoiceTailSilenceSeconds
+            : WhisperTailSilenceSeconds;
+
+    private double CurrentOverlapSeconds =>
+        _recognitionEngine == SpeechRecognitionEngine.SenseVoiceSmall
+            ? SenseVoiceOverlapSeconds
+            : WhisperOverlapSeconds;
 
     private static Channel<RecognizedSegment> CreateTranslationChannel(int capacity) =>
         Channel.CreateBounded<RecognizedSegment>(new BoundedChannelOptions(Math.Max(2, capacity))
