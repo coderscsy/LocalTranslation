@@ -11,6 +11,9 @@ namespace LocalTranslator.App;
 
 public partial class MainWindow : Window
 {
+    private const int WmHotkey = 0x0312;
+    private const int ScreenshotHotkeyId = 0x4C53;
+    private const uint ModNoRepeat = 0x4000;
     private readonly MainViewModel _viewModel;
     private readonly IScreenCaptureService _screenCaptureService;
     private readonly IAppLogger _logger;
@@ -25,6 +28,10 @@ public partial class MainWindow : Window
     private bool _trayTipShown;
     private bool _allowClose;
     private bool _exitInProgress;
+    private bool _screenshotCaptureInProgress;
+    private IntPtr _windowHandle;
+    private HwndSource? _windowSource;
+    private ScreenshotHotkeyGesture _screenshotHotkey = ScreenshotHotkeyGesture.Default;
 
     public MainWindow(
         MainViewModel viewModel,
@@ -44,7 +51,9 @@ public partial class MainWindow : Window
         _providerStore = providerStore;
         _providerRouter = providerRouter;
         _windowPreferences = AppWindowPreferences.Load();
+        _screenshotHotkey = ScreenshotHotkeyPreferences.Load().Gesture;
         DataContext = viewModel;
+        SourceInitialized += MainWindow_SourceInitialized;
         Loaded += (_, _) =>
         {
             RefreshTranslationProviderSummary();
@@ -63,11 +72,76 @@ public partial class MainWindow : Window
         Closing += MainWindow_Closing;
         Closed += (_, _) =>
         {
+            ReleaseScreenshotHotkey();
             _trayIcon.Visible = false;
             _trayIcon.Dispose();
             if (!ReferenceEquals(_trayDrawingIcon, System.Drawing.SystemIcons.Application))
                 _trayDrawingIcon.Dispose();
         };
+    }
+
+    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
+    {
+        _windowHandle = new WindowInteropHelper(this).Handle;
+        _windowSource = HwndSource.FromHwnd(_windowHandle);
+        _windowSource?.AddHook(WindowMessageHook);
+        if (!RegisterScreenshotHotkey(_screenshotHotkey))
+        {
+            _viewModel.SetStatus(
+                $"截图翻译快捷键 {_screenshotHotkey.DisplayText} 已被其他程序占用，请在设置中修改。",
+                isError: true);
+        }
+    }
+
+    private IntPtr WindowMessageHook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (message == WmHotkey && wParam.ToInt32() == ScreenshotHotkeyId)
+        {
+            handled = true;
+            _ = Dispatcher.BeginInvoke(new Action(async () => await StartScreenshotTranslationAsync()));
+        }
+        return IntPtr.Zero;
+    }
+
+    internal bool TryUpdateScreenshotHotkey(ScreenshotHotkeyGesture gesture, out string error)
+    {
+        error = string.Empty;
+        if (!gesture.IsValid)
+        {
+            error = "快捷键必须包含 Ctrl、Alt、Shift 或 Win，并搭配一个普通按键。";
+            return false;
+        }
+
+        if (gesture == _screenshotHotkey) return true;
+        var previous = _screenshotHotkey;
+        if (_windowHandle != IntPtr.Zero) UnregisterHotKey(_windowHandle, ScreenshotHotkeyId);
+        if (_windowHandle != IntPtr.Zero && !RegisterScreenshotHotkey(gesture))
+        {
+            _ = RegisterScreenshotHotkey(previous);
+            error = $"快捷键 {gesture.DisplayText} 已被系统或其他程序占用。原快捷键仍然有效。";
+            return false;
+        }
+
+        _screenshotHotkey = gesture;
+        ScreenshotHotkeyPreferences.Save(gesture);
+        _viewModel.SetStatus($"截图翻译快捷键已更新为 {gesture.DisplayText}。", isError: false);
+        return true;
+    }
+
+    private bool RegisterScreenshotHotkey(ScreenshotHotkeyGesture gesture) =>
+        RegisterHotKey(
+            _windowHandle,
+            ScreenshotHotkeyId,
+            (uint)gesture.Modifiers | ModNoRepeat,
+            (uint)gesture.VirtualKey);
+
+    private void ReleaseScreenshotHotkey()
+    {
+        if (_windowHandle != IntPtr.Zero)
+            UnregisterHotKey(_windowHandle, ScreenshotHotkeyId);
+        _windowSource?.RemoveHook(WindowMessageHook);
+        _windowSource = null;
+        _windowHandle = IntPtr.Zero;
     }
 
     private async void Translate_Click(object sender, RoutedEventArgs e) =>
@@ -340,6 +414,8 @@ public partial class MainWindow : Window
 
     private async Task StartScreenshotTranslationAsync()
     {
+        if (_screenshotCaptureInProgress) return;
+        _screenshotCaptureInProgress = true;
         try
         {
             Hide();
@@ -368,8 +444,17 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _screenshotCaptureInProgress = false;
             Show();
             Activate();
         }
     }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint virtualKey);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 }

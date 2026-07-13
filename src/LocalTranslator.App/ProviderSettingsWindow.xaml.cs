@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using LocalTranslator.Infrastructure.Services;
 
 namespace LocalTranslator.App;
@@ -12,6 +13,7 @@ public partial class ProviderSettingsWindow : Window
     private readonly LocalLlmTranslationService _localService;
     private TranslationProviderSettings _settings;
     private bool _isLoading;
+    private ScreenshotHotkeyGesture _pendingScreenshotHotkey = ScreenshotHotkeyGesture.Default;
 
     public ProviderSettingsWindow(
         SecureTranslationProviderStore store,
@@ -24,8 +26,10 @@ public partial class ProviderSettingsWindow : Window
         _router = router;
         _localService = localService;
         _settings = store.Load();
+        _pendingScreenshotHotkey = ScreenshotHotkeyPreferences.Load().Gesture;
         Providers = BuildProviderChoices(_settings);
         DataContext = this;
+        ScreenshotHotkeyTextBox.Text = _pendingScreenshotHotkey.DisplayText;
 
         _isLoading = true;
         ProviderComboBox.SelectedItem = Providers.FirstOrDefault(item =>
@@ -165,6 +169,15 @@ public partial class ProviderSettingsWindow : Window
 
         try
         {
+            if (System.Windows.Application.Current.MainWindow is MainWindow mainWindow &&
+                !mainWindow.TryUpdateScreenshotHotkey(_pendingScreenshotHotkey, out var hotkeyError))
+            {
+                ScreenshotHotkeyHintText.Foreground = System.Windows.Media.Brushes.Firebrick;
+                ScreenshotHotkeyHintText.Text = hotkeyError;
+                ScreenshotHotkeyTextBox.Focus();
+                return;
+            }
+
             if (choice.Kind == ProviderKind.Online)
             {
                 var updated = ReadOnlineProvider(choice);
@@ -202,6 +215,36 @@ public partial class ProviderSettingsWindow : Window
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void ScreenshotHotkeyTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        e.Handled = true;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or
+            Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin)
+            return;
+
+        var candidate = new ScreenshotHotkeyGesture(Keyboard.Modifiers, key);
+        if (!candidate.IsValid)
+        {
+            ScreenshotHotkeyHintText.Foreground = System.Windows.Media.Brushes.Firebrick;
+            ScreenshotHotkeyHintText.Text = "请同时按住 Ctrl、Alt、Shift 或 Win 中的至少一个修饰键。";
+            return;
+        }
+
+        _pendingScreenshotHotkey = candidate;
+        ScreenshotHotkeyTextBox.Text = candidate.DisplayText;
+        ScreenshotHotkeyHintText.Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush");
+        ScreenshotHotkeyHintText.Text = "保存后立即全局生效；若组合键冲突，会自动保留原快捷键。";
+    }
+
+    private void ResetScreenshotHotkey_Click(object sender, RoutedEventArgs e)
+    {
+        _pendingScreenshotHotkey = ScreenshotHotkeyGesture.Default;
+        ScreenshotHotkeyTextBox.Text = _pendingScreenshotHotkey.DisplayText;
+        ScreenshotHotkeyHintText.Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush");
+        ScreenshotHotkeyHintText.Text = "已恢复默认 Ctrl + Shift + F9，点击“保存并使用”后生效。";
+    }
 }
 
 public sealed record ProviderChoice(string Id, string DisplayName, ProviderKind Kind);

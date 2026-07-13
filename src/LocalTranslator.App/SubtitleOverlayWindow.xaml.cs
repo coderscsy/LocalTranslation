@@ -157,7 +157,7 @@ public partial class SubtitleOverlayWindow : Window
         {
             line.TranslationText = string.IsNullOrWhiteSpace(partialTranslation)
                 ? "正在翻译…"
-                : partialTranslation.Trim();
+                : SubtitleTextFormatter.FormatForDisplay(partialTranslation);
             line.IsPending = false;
             ApplyLineStyle(line, false);
         }
@@ -169,7 +169,7 @@ public partial class SubtitleOverlayWindow : Window
     {
         var translation = string.IsNullOrWhiteSpace(segment.TranslatedText)
             ? "正在翻译…"
-            : segment.TranslatedText.Trim();
+            : SubtitleTextFormatter.FormatForDisplay(segment.TranslatedText);
         AppendOrUpdateTranslation(segment, translation, bilingual);
         UpdateTaskbarTitle(translation);
         ScrollToLatestSubtitle();
@@ -191,8 +191,12 @@ public partial class SubtitleOverlayWindow : Window
         }
 
         line.RawSourceText = sourceText;
-        line.SourceText = bilingual && _showSourceText ? sourceText : string.Empty;
-        line.SourceVisibility = bilingual && _showSourceText ? Visibility.Visible : Visibility.Collapsed;
+        var existingTranslationDuplicatesSource =
+            !string.IsNullOrWhiteSpace(line.TranslationText) &&
+            TranslationOutputValidator.AreEquivalent(sourceText, line.TranslationText);
+        var showSource = bilingual && _showSourceText && !existingTranslationDuplicatesSource;
+        line.SourceText = showSource ? SubtitleTextFormatter.FormatForDisplay(sourceText) : string.Empty;
+        line.SourceVisibility = showSource ? Visibility.Visible : Visibility.Collapsed;
         // Keep the latest stable preview while the same ASR sentence grows. Clearing it
         // on every partial result caused a screen full of duplicated "正在翻译…" rows.
         if (isNewLine || string.IsNullOrWhiteSpace(line.TranslationText))
@@ -222,9 +226,9 @@ public partial class SubtitleOverlayWindow : Window
         line.RawSourceText = sourceText;
         var showSource = bilingual && _showSourceText &&
                          !TranslationOutputValidator.AreEquivalent(sourceText, translation);
-        line.SourceText = showSource ? sourceText : string.Empty;
+        line.SourceText = showSource ? SubtitleTextFormatter.FormatForDisplay(sourceText) : string.Empty;
         line.SourceVisibility = showSource ? Visibility.Visible : Visibility.Collapsed;
-        line.TranslationText = translation;
+        line.TranslationText = SubtitleTextFormatter.FormatForDisplay(translation);
         line.IsPending = false;
         ApplyLineStyle(line, false);
         TrimSubtitleLines();

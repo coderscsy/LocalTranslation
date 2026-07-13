@@ -130,6 +130,16 @@ if (simplified != "轻易讲所有繁体字幕")
     throw new InvalidOperationException("Traditional-to-simplified normalization smoke test failed.");
 }
 
+var normalizedNumbers = SubtitleTextFormatter.NormalizeNumbers(
+    "三六零P 到四三零P，四K，刷新率一百四十四Hz，版本四点一，二零二六年");
+if (normalizedNumbers != "360P 到430P，4K，刷新率144Hz，版本4.1，2026年")
+    throw new InvalidOperationException($"Spoken-number normalization smoke test failed: {normalizedNumbers}");
+
+var sentenceFormatted = SubtitleTextFormatter.FormatForDisplay(
+    "First sentence. Second sentence? 版本4.1没有被拆开。下一句！");
+if (sentenceFormatted != "First sentence.\nSecond sentence?\n版本4.1没有被拆开。\n下一句！")
+    throw new InvalidOperationException($"Bilingual sentence formatting smoke test failed: {sentenceFormatted}");
+
 if (!VideoSubtitleService.IsSubtitleArtifact("(字幕:J Chong)") ||
     !VideoSubtitleService.IsSubtitleArtifact("[Subtitles by Alex]") ||
     VideoSubtitleService.IsSubtitleArtifact("字幕在哪里设置？"))

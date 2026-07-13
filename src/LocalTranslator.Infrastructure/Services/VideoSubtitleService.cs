@@ -609,8 +609,8 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                 Sequence = Interlocked.Increment(ref _utteranceSequence),
                 Start = start,
                 End = end,
-                SourceText = SemanticSubtitleBuffer.Normalize(sourceText),
-                DisplayedSource = SemanticSubtitleBuffer.Normalize(displayedSource),
+                SourceText = SemanticSubtitleBuffer.Normalize(SubtitleTextFormatter.NormalizeNumbers(sourceText)),
+                DisplayedSource = SemanticSubtitleBuffer.Normalize(SubtitleTextFormatter.NormalizeNumbers(displayedSource)),
                 SourceLanguage = sourceLanguage,
                 CumulativeRevisionStart = replacePendingText ? start : null
             };
@@ -628,16 +628,16 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
                 }
 
                 _pendingUtterance.SourceText = SemanticSubtitleBuffer.JoinFragments(
-                    _pendingUtterance.CumulativeSourcePrefix, sourceText, sourceLanguage);
+                    _pendingUtterance.CumulativeSourcePrefix, SubtitleTextFormatter.NormalizeNumbers(sourceText), sourceLanguage);
                 _pendingUtterance.DisplayedSource = SemanticSubtitleBuffer.JoinFragments(
-                    _pendingUtterance.CumulativeDisplayedPrefix, displayedSource, sourceLanguage);
+                    _pendingUtterance.CumulativeDisplayedPrefix, SubtitleTextFormatter.NormalizeNumbers(displayedSource), sourceLanguage);
             }
             else
             {
                 _pendingUtterance.SourceText = SemanticSubtitleBuffer.JoinFragments(
-                    _pendingUtterance.SourceText, sourceText, sourceLanguage);
+                    _pendingUtterance.SourceText, SubtitleTextFormatter.NormalizeNumbers(sourceText), sourceLanguage);
                 _pendingUtterance.DisplayedSource = SemanticSubtitleBuffer.JoinFragments(
-                    _pendingUtterance.DisplayedSource, displayedSource, sourceLanguage);
+                    _pendingUtterance.DisplayedSource, SubtitleTextFormatter.NormalizeNumbers(displayedSource), sourceLanguage);
             }
         }
 
@@ -652,7 +652,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
         SourceSegmentReady?.Invoke(this, new SubtitleSegment(
             _pendingUtterance.Start,
             _pendingUtterance.End,
-            _pendingUtterance.DisplayedSource,
+            SubtitleTextFormatter.FormatForDisplay(_pendingUtterance.DisplayedSource),
             string.Empty,
             _pendingUtterance.Sequence));
 
@@ -665,7 +665,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             SegmentReady?.Invoke(this, new SubtitleSegment(
                 _pendingUtterance.Start,
                 _pendingUtterance.End,
-                _pendingUtterance.DisplayedSource,
+                SubtitleTextFormatter.FormatForDisplay(_pendingUtterance.DisplayedSource),
                 NormalizeForTarget(_pendingUtterance.SourceText, _target),
                 _pendingUtterance.Sequence));
         }
@@ -691,7 +691,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             SegmentReady?.Invoke(this, new SubtitleSegment(
                 pending.Start,
                 pending.End,
-                displayedSource,
+                SubtitleTextFormatter.FormatForDisplay(displayedSource),
                 NormalizeForTarget(sourceText, _target),
                 pending.Sequence));
         }
@@ -882,8 +882,13 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             FullMode = BoundedChannelFullMode.DropOldest
         });
 
-    private static string NormalizeForTarget(string text, SupportedLanguage target) =>
-        target == SupportedLanguage.ChineseSimplified ? ChineseTextNormalizer.ToSimplified(text) : text;
+    private static string NormalizeForTarget(string text, SupportedLanguage target)
+    {
+        var normalized = target == SupportedLanguage.ChineseSimplified
+            ? ChineseTextNormalizer.ToSimplified(text)
+            : text;
+        return SubtitleTextFormatter.FormatForDisplay(normalized);
+    }
 
     public static bool IsSubtitleArtifact(string text) =>
         !string.IsNullOrWhiteSpace(text) && SubtitleArtifactPattern.IsMatch(text.Trim());

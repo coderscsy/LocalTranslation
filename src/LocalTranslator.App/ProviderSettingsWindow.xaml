@@ -1,9 +1,9 @@
 <Window x:Class="LocalTranslator.App.ProviderSettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="翻译 Provider 设置"
+        Title="应用与翻译设置"
         Width="650"
-        Height="590"
+        Height="700"
         MinWidth="600"
         MinHeight="540"
         WindowStartupLocation="CenterOwner"
@@ -47,7 +47,7 @@
                 <TextBlock Foreground="{StaticResource TextBrush}"
                            FontSize="21"
                            FontWeight="SemiBold"
-                           Text="翻译 Provider" />
+                           Text="应用与翻译设置" />
                 <TextBlock Margin="0,5,0,0"
                            Foreground="{StaticResource MutedTextBrush}"
                            FontSize="12"
@@ -59,6 +59,52 @@
                       Padding="26,20"
                       VerticalScrollBarVisibility="Auto">
             <StackPanel>
+                <Border Padding="18,16"
+                        Margin="0,0,0,18"
+                        Style="{StaticResource CardStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Foreground="{StaticResource TextBrush}"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Text="截图翻译快捷键" />
+                                <TextBlock Margin="0,4,0,0"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="11"
+                                           Text="全局生效；主窗口最小化到托盘后也可以直接截图。" />
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Padding="11,6"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Content="恢复默认"
+                                    Click="ResetScreenshotHotkey_Click" />
+                        </Grid>
+                        <TextBox x:Name="ScreenshotHotkeyTextBox"
+                                 Grid.Row="1"
+                                 Margin="0,12,0,0"
+                                 IsReadOnly="True"
+                                 Cursor="Hand"
+                                 Style="{StaticResource SettingsTextBoxStyle}"
+                                 PreviewKeyDown="ScreenshotHotkeyTextBox_PreviewKeyDown" />
+                        <TextBlock x:Name="ScreenshotHotkeyHintText"
+                                   Grid.Row="2"
+                                   Margin="1,7,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="10"
+                                   Text="点击输入框后，直接按下新的组合键（必须包含 Ctrl / Alt / Shift / Win）。" />
+                    </Grid>
+                </Border>
+
                 <TextBlock Style="{StaticResource FieldLabelStyle}" Text="当前翻译来源" />
                 <ComboBox x:Name="ProviderComboBox"
                           Height="44"
