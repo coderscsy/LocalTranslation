@@ -60,7 +60,8 @@
                 </StackPanel>
                 <StackPanel Grid.Row="2" Grid.Column="1" Margin="8,0,0,0">
                     <TextBlock Text="目标语言"/><ComboBox x:Name="TargetCombo" Margin="0,6,0,0" Height="40" ItemsSource="{Binding TargetLanguages}"
-                                                        ItemTemplate="{StaticResource LanguageItemTemplate}"/>
+                                                        ItemTemplate="{StaticResource LanguageItemTemplate}"
+                                                        SelectionChanged="TargetCombo_SelectionChanged"/>
                 </StackPanel>
                 <WrapPanel Grid.Row="3" Grid.ColumnSpan="2" Margin="0,15,0,0" Orientation="Horizontal">
                     <RadioButton x:Name="LiveModeRadio" IsChecked="True" VerticalAlignment="Center" Content="实时字幕"/>

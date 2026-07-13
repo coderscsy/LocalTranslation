@@ -97,7 +97,8 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Button x:Name="TargetLanguageButton" Grid.Column="0"
-                            Style="{StaticResource OverlayToolButtonStyle}" Content="🌐  翻译为：简体中文" />
+                            Style="{StaticResource OverlayToolButtonStyle}" Content="🌐  翻译为：简体中文 ▼"
+                            Click="TargetLanguageButton_Click" />
                     <Button x:Name="ToggleSourceButton" Grid.Column="1" Margin="10,0,0,0"
                             Style="{StaticResource OverlayToolButtonStyle}" Content="▣  关闭原文"
                             Click="ToggleSource_Click" />

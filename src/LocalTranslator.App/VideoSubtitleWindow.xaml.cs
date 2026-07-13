@@ -26,6 +26,7 @@ public partial class VideoSubtitleWindow : Window
     private bool _allowClose;
     private bool _settingsLoaded;
     private bool _applyingOverlayPlacement;
+    private bool _syncingTargetLanguage;
     private string? _selectedVideoProviderId;
     private double? _overlayLeft;
     private double? _overlayTop;
@@ -198,6 +199,7 @@ public partial class VideoSubtitleWindow : Window
                 _overlay.PlacementChanged += OverlayOnPlacementChanged;
                 _overlay.InteractionModeChanged += OverlayOnInteractionModeChanged;
                 _overlay.FontSizeChanged += OverlayOnFontSizeChanged;
+                _overlay.TargetLanguageChanged += OverlayOnTargetLanguageChanged;
                 _overlay.CloseRequested += OverlayOnCloseRequested;
                 _overlay.Show();
             }
@@ -356,6 +358,48 @@ public partial class VideoSubtitleWindow : Window
         TranslationFontSlider.Value = sizes.TranslationFontSize;
         _applyingOverlayPlacement = false;
         SaveSettings();
+    }
+
+    private void OverlayOnTargetLanguageChanged(object? sender, SupportedLanguage target)
+    {
+        if (_syncingTargetLanguage) return;
+        var source = SourceCombo.SelectedItem is LanguageItem sourceItem
+            ? sourceItem.Value
+            : SupportedLanguage.AutoDetect;
+        if (source != SupportedLanguage.AutoDetect && source == target)
+        {
+            StatusText.Text = "目标语言不能与源语言相同，请先把源语言改为自动检测或选择其他目标语言。";
+            if (TargetCombo.SelectedItem is LanguageItem currentTarget)
+                _overlay?.SetTargetLanguage(currentTarget.Value);
+            return;
+        }
+
+        var targetItem = TargetLanguages.FirstOrDefault(item => item.Value == target);
+        if (targetItem is null) return;
+        ApplyTargetLanguage(targetItem, updateCombo: true);
+    }
+
+    private void TargetCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (!_settingsLoaded || _syncingTargetLanguage || TargetCombo.SelectedItem is not LanguageItem target) return;
+        ApplyTargetLanguage(target, updateCombo: false);
+    }
+
+    private void ApplyTargetLanguage(LanguageItem targetItem, bool updateCombo)
+    {
+        _syncingTargetLanguage = true;
+        try
+        {
+            if (updateCombo) TargetCombo.SelectedItem = targetItem;
+            _service.SetTargetLanguage(targetItem.Value);
+            _overlay?.SetTargetLanguage(targetItem.Value);
+            StatusText.Text = $"后续视频字幕将翻译为：{targetItem.DisplayName}。";
+            SaveSettings();
+        }
+        finally
+        {
+            _syncingTargetLanguage = false;
+        }
     }
 
     private void VideoProvider_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)

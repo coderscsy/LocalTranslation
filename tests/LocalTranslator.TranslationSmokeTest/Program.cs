@@ -106,6 +106,26 @@ if (TranslationOutputValidator.IsValid("Where are we going?", "Where are we goin
     throw new InvalidOperationException("Target-language validation smoke test failed.");
 }
 
+var financeFragments = new[]
+{
+    "Following my completion of undergraduate studies,",
+    "I am driven by a strong passion",
+    "to pursue further academic accomplishments",
+    "in the field.",
+    "of finance."
+};
+var mergedFinanceSentence = SemanticSubtitleBuffer.MergeFragments(financeFragments, SupportedLanguage.English);
+var expectedFinanceSentence =
+    "Following my completion of undergraduate studies, I am driven by a strong passion to pursue further academic accomplishments in the field of finance.";
+if (mergedFinanceSentence != expectedFinanceSentence ||
+    SemanticSubtitleBuffer.ShouldFlush("in the field.", TimeSpan.FromSeconds(1)) ||
+    !SemanticSubtitleBuffer.ShouldFlush(
+        "Following my completion of undergraduate studies, I am driven by a strong passion to pursue further academic accomplishments in the field of finance.",
+        TimeSpan.FromSeconds(3)))
+{
+    throw new InvalidOperationException("Semantic subtitle buffering smoke test failed.");
+}
+
 var translationWindow = new TranslationWindowManager();
 translationWindow.UpdateStream("Hello");
 translationWindow.UpdateStream("Hello world");

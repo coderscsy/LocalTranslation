@@ -47,6 +47,13 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
 
     public bool IsRunning => _capture is not null;
 
+    public void SetTargetLanguage(SupportedLanguage target)
+    {
+        _target = target;
+        _translationWindow.Reset();
+        StatusChanged?.Invoke(this, $"后续字幕目标语言已切换为：{target.ToDisplayName()}。");
+    }
+
     public Task StartAsync(string whisperModelPath, SupportedLanguage source, SupportedLanguage target,
         int translationConcurrency = 3,
         CancellationToken cancellationToken = default)
@@ -296,17 +303,17 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
             {
                 Start = start,
                 End = end,
-                SourceText = NormalizeWhisperText(sourceText),
-                DisplayedSource = NormalizeWhisperText(displayedSource),
+                SourceText = SemanticSubtitleBuffer.Normalize(sourceText),
+                DisplayedSource = SemanticSubtitleBuffer.Normalize(displayedSource),
                 SourceLanguage = sourceLanguage
             };
         }
         else
         {
             _pendingUtterance.End = end > _pendingUtterance.End ? end : _pendingUtterance.End;
-            _pendingUtterance.SourceText = JoinFragments(
+            _pendingUtterance.SourceText = SemanticSubtitleBuffer.JoinFragments(
                 _pendingUtterance.SourceText, sourceText, sourceLanguage);
-            _pendingUtterance.DisplayedSource = JoinFragments(
+            _pendingUtterance.DisplayedSource = SemanticSubtitleBuffer.JoinFragments(
                 _pendingUtterance.DisplayedSource, displayedSource, sourceLanguage);
         }
 
@@ -362,62 +369,7 @@ public sealed class VideoSubtitleService(ITranslationService translationService,
     }
 
     private static bool ShouldFlushPending(PendingUtterance pending) =>
-        EndsSentence(pending.SourceText) ||
-        pending.End - pending.Start >= TimeSpan.FromSeconds(4.2) ||
-        pending.SourceText.Length >= 150;
-
-    private static bool EndsSentence(string text)
-    {
-        var value = text.TrimEnd();
-        return value.EndsWith('.') ||
-               value.EndsWith('!') ||
-               value.EndsWith('?') ||
-               value.EndsWith('。') ||
-               value.EndsWith('！') ||
-               value.EndsWith('？');
-    }
-
-    private static string JoinFragments(string existing, string next, SupportedLanguage language)
-    {
-        var left = NormalizeWhisperText(existing);
-        var right = NormalizeWhisperText(next);
-        if (string.IsNullOrWhiteSpace(left)) return right;
-        if (string.IsNullOrWhiteSpace(right)) return left;
-        if (left.Contains(right, StringComparison.OrdinalIgnoreCase)) return left;
-        if (right.Contains(left, StringComparison.OrdinalIgnoreCase)) return right;
-
-        var overlap = FindSuffixPrefixOverlap(left, right);
-        if (overlap > 0) return $"{left}{right[overlap..]}";
-
-        if (language is SupportedLanguage.ChineseSimplified or SupportedLanguage.Japanese)
-            return $"{left}{right}";
-
-        return NeedsNoSpaceBefore(right) || NeedsNoSpaceAfter(left)
-            ? $"{left}{right}"
-            : $"{left} {right}";
-    }
-
-    private static string NormalizeWhisperText(string text) =>
-        string.Join(' ', text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries));
-
-    private static bool NeedsNoSpaceBefore(string text) =>
-        text.Length > 0 && ",.;:!?%)]}，。；：！？）】》".Contains(text[0]);
-
-    private static bool NeedsNoSpaceAfter(string text) =>
-        text.Length > 0 && "([{（【《".Contains(text[^1]);
-
-    private static int FindSuffixPrefixOverlap(string left, string right)
-    {
-        var maximum = Math.Min(left.Length, right.Length);
-        for (var length = maximum; length >= 4; length--)
-        {
-            if (left.AsSpan(left.Length - length, length)
-                .Equals(right.AsSpan(0, length), StringComparison.OrdinalIgnoreCase))
-                return length;
-        }
-
-        return 0;
-    }
+        SemanticSubtitleBuffer.ShouldFlush(pending.SourceText, pending.End - pending.Start);
 
     private async Task ProcessTranslationsAsync(int workerId, CancellationToken cancellationToken)
     {

@@ -40,6 +40,7 @@ public partial class SubtitleOverlayWindow : Window
     private double _sourceFontSize;
     private double _translationFontSize;
     private double _maxTextWidth = 820;
+    private SupportedLanguage _targetLanguage = SupportedLanguage.ChineseSimplified;
     private string _targetLanguageLabel = SupportedLanguage.ChineseSimplified.ToDisplayName();
     private readonly ObservableCollection<OverlaySubtitleLine> _subtitleLines = [];
 
@@ -59,7 +60,7 @@ public partial class SubtitleOverlayWindow : Window
         Height = Math.Clamp(overlayHeight, MinHeight, MaxHeight);
         _expanded = Height > 240;
         _interactionEnabled = interactionEnabled;
-        _targetLanguageLabel = targetLanguage.ToDisplayName();
+        SetTargetLanguage(targetLanguage);
         ShowInTaskbar = false;
         SubtitleItemsControl.ItemsSource = _subtitleLines;
         ApplyLayout(sourceFontSize, translationFontSize, bottomOffset, overlayWidth, false);
@@ -89,6 +90,7 @@ public partial class SubtitleOverlayWindow : Window
     public event EventHandler<SubtitleOverlayPlacement>? PlacementChanged;
     public event EventHandler<bool>? InteractionModeChanged;
     public event EventHandler<SubtitleFontSizeChanged>? FontSizeChanged;
+    public event EventHandler<SupportedLanguage>? TargetLanguageChanged;
     public event EventHandler? CloseRequested;
 
     public bool IsClickThrough => !_interactionEnabled;
@@ -132,6 +134,13 @@ public partial class SubtitleOverlayWindow : Window
     {
         UpdateDefaultPosition();
         RaisePlacementChanged();
+    }
+
+    public void SetTargetLanguage(SupportedLanguage targetLanguage)
+    {
+        _targetLanguage = targetLanguage;
+        _targetLanguageLabel = targetLanguage.ToDisplayName();
+        if (IsInitialized) RefreshToolbarText();
     }
 
     public void ShowSource(string sourceText, bool bilingual)
@@ -208,7 +217,7 @@ public partial class SubtitleOverlayWindow : Window
 
     private void TrimSubtitleLines()
     {
-        var maximumLines = _expanded ? 8 : 3;
+        var maximumLines = _expanded ? 24 : 6;
         while (_subtitleLines.Count > maximumLines)
             _subtitleLines.RemoveAt(0);
         RefreshLineStyles();
@@ -476,7 +485,7 @@ public partial class SubtitleOverlayWindow : Window
 
     private void RefreshToolbarText()
     {
-        TargetLanguageButton.Content = $"🌐  翻译为：{_targetLanguageLabel}";
+        TargetLanguageButton.Content = $"🌐  翻译为：{_targetLanguageLabel} ▼";
         ToggleSourceButton.Content = _showSourceText ? "▣  关闭原文" : "▣  显示原文";
         ToggleSourceMenuItem.Header = _showSourceText ? "关闭原文" : "显示原文";
         ToggleExpandedButton.Content = _expanded ? "↙  收起字幕" : "↗  展开字幕";
@@ -487,6 +496,38 @@ public partial class SubtitleOverlayWindow : Window
             2 => "Aₐ  大号字体 ▼",
             _ => "Aₐ  中号字体 ▼"
         };
+    }
+
+    private void TargetLanguageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_interactionEnabled) return;
+
+        var menu = new ContextMenu
+        {
+            PlacementTarget = TargetLanguageButton,
+            Placement = PlacementMode.Bottom
+        };
+
+        foreach (var item in LanguageItem.Targets)
+        {
+            var menuItem = new MenuItem
+            {
+                Header = item.DisplayName,
+                Tag = item.Value,
+                IsCheckable = true,
+                IsChecked = item.Value == _targetLanguage
+            };
+            menuItem.Click += (_, _) =>
+            {
+                if (menuItem.Tag is not SupportedLanguage language) return;
+                SetTargetLanguage(language);
+                TargetLanguageChanged?.Invoke(this, language);
+            };
+            menu.Items.Add(menuItem);
+        }
+
+        menu.IsOpen = true;
+        e.Handled = true;
     }
 
     private void ResetPositionMenuItem_Click(object sender, RoutedEventArgs e) => ResetPosition();
