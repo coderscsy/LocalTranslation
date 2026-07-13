@@ -16,8 +16,9 @@ public sealed class LocalModelManager : IDisposable
     public LocalModelManager(AppOptions options)
     {
         var configuredRoot = options.Translation.LocalLlm.ModelsRoot;
+        var dataRoot = AppStoragePaths.ResolveDataRoot(options);
         ModelsRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredRoot)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LocalTranslator", "Models")
+            ? Path.Combine(dataRoot, "Models")
             : Environment.ExpandEnvironmentVariables(configuredRoot));
         Directory.CreateDirectory(ModelsRoot);
         _registryPath = Path.Combine(Path.GetDirectoryName(ModelsRoot)!, "local-models.json");

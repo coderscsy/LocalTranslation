@@ -14,8 +14,7 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-
-        var logger = new FileAppLogger();
+        FileAppLogger? logger = null;
 
         try
         {
@@ -25,8 +24,9 @@ public partial class App : System.Windows.Application
                 "LocalTranslator",
                 "appsettings.local.json");
             var options = AppOptionsLoader.Load(configPath, localConfigPath);
+            logger = new FileAppLogger(options);
             _localTranslationService = new LocalLlmTranslationService(options, logger);
-            _providerStore = new SecureTranslationProviderStore();
+            _providerStore = new SecureTranslationProviderStore(options);
             var translationService = new TranslationProviderRouter(
                 _localTranslationService,
                 _providerStore,
@@ -49,7 +49,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception exception)
         {
-            logger.Error("Application startup failed.", exception);
+            logger?.Error("Application startup failed.", exception);
             MessageBox.Show(
                 $"程序启动失败：{exception.Message}",
                 "Local Translator",

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using LocalTranslator.Infrastructure.Configuration;
 
 namespace LocalTranslator.Infrastructure.Services;
 
@@ -10,11 +11,9 @@ public sealed class SecureTranslationProviderStore
     private readonly object _syncRoot = new();
     private readonly string _path;
 
-    public SecureTranslationProviderStore()
+    public SecureTranslationProviderStore(AppOptions options)
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LocalTranslator");
+        var directory = AppStoragePaths.ResolveDataRoot(options);
         Directory.CreateDirectory(directory);
         _path = Path.Combine(directory, "translation-providers.dat");
     }

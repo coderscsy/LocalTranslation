@@ -9,6 +9,7 @@ using System.Windows;
 using System.Windows.Input;
 using LocalTranslator.Core.Abstractions;
 using LocalTranslator.Core.Models;
+using LocalTranslator.Infrastructure.Configuration;
 using LocalTranslator.Infrastructure.Services;
 using Microsoft.Win32;
 
@@ -24,7 +25,8 @@ public partial class VideoSubtitleWindow : Window
     private readonly VideoTranslationSessionService _translationSession = new();
     private readonly TranslationProviderRouter _providerRouter;
     private readonly TranslationProviderSettings _providerSettings;
-    private readonly SpeechModelManager _speechModelManager = new();
+    private readonly SpeechModelManager _speechModelManager;
+    private readonly string _dataRoot;
     private readonly string _settingsPath;
     private SubtitleOverlayWindow? _overlay;
     private bool _running;
@@ -49,9 +51,12 @@ public partial class VideoSubtitleWindow : Window
     public VideoSubtitleWindow(
         SecureTranslationProviderStore providerStore,
         TranslationProviderRouter providerRouter,
-        IAppLogger logger)
+        IAppLogger logger,
+        AppOptions options)
     {
         InitializeComponent();
+        _dataRoot = AppStoragePaths.ResolveDataRoot(options);
+        _speechModelManager = new SpeechModelManager(options);
         _providerRouter = providerRouter;
         _providerSettings = providerStore.Load();
         VideoProviders = new ObservableCollection<VideoProviderChoice>(
@@ -67,7 +72,7 @@ public partial class VideoSubtitleWindow : Window
         SourceCombo.SelectedIndex = 0;
         TargetCombo.SelectedItem = TargetLanguages.First(item => item.Value == SupportedLanguage.ChineseSimplified);
         AsrEngineCombo.SelectedItem = AsrEngines[0];
-        _settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LocalTranslator", "video-subtitle-settings.json");
+        _settingsPath = Path.Combine(_dataRoot, "video-subtitle-settings.json");
         LoadSettings();
         _settingsLoaded = true;
         SaveSettings();
@@ -139,6 +144,7 @@ public partial class VideoSubtitleWindow : Window
             SenseVoiceModelBox is null ||
             TestAsrButton is null ||
             AsrStartCommandBox is null ||
+            ResetAsrCommandButton is null ||
             InstallAsrDependenciesButton is null ||
             StartAsrServerButton is null ||
             AsrStatusText is null ||
@@ -177,6 +183,8 @@ public partial class VideoSubtitleWindow : Window
         SenseVoiceUrlBox.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && !_running;
         SenseVoiceModelBox.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && !_running;
         TestAsrButton.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && EnableSenseVoiceCheck.IsChecked == true && !_running;
+        AsrStartCommandBox.IsEnabled = !_running;
+        ResetAsrCommandButton.IsEnabled = !_running;
         InstallAsrDependenciesButton.IsEnabled = !_asrDependenciesInstalled && !_checkingAsrDependencies;
         InstallAsrDependenciesButton.Content = _checkingAsrDependencies
             ? "正在检查…"
@@ -367,6 +375,13 @@ public partial class VideoSubtitleWindow : Window
         await StartAsrServerAsync();
     }
 
+    private void ResetAsrCommand_Click(object sender, RoutedEventArgs e)
+    {
+        AsrStartCommandBox.Text = DefaultAsrStartCommand;
+        SaveSettings();
+        SetAsrStatus("ASR 启动命令已恢复为安全默认值。");
+    }
+
     private async Task StartAsrServerAsync()
     {
         StartAsrServerButton.IsEnabled = false;
@@ -394,12 +409,13 @@ public partial class VideoSubtitleWindow : Window
                     $"ASR 依赖不完整，请先安装：{string.Join("、", dependencyCheck.MissingComponents)}。");
             }
 
-            var command = await NormalizeAsrStartCommandAsync(AsrStartCommandBox.Text.Trim());
+            var configuredCommand = ValidateAsrStartCommand(AsrStartCommandBox.Text);
+            var command = await NormalizeAsrStartCommandAsync(configuredCommand);
             if (string.IsNullOrWhiteSpace(command))
                 throw new InvalidOperationException("ASR 服务启动命令不能为空。");
 
             lock (_asrServerOutputLock) _asrServerOutput.Clear();
-            _managedAsrServerProcess = StartBackgroundCommand(command, CaptureAsrServerOutput);
+            _managedAsrServerProcess = StartBackgroundCommand(command, CaptureAsrServerOutput, _dataRoot);
             SetAsrStatus("ASR 服务正在启动；首次运行会下载约 936 MiB 的 SenseVoice 模型，请查看这里的实时进度…");
 
             var deadline = DateTimeOffset.Now.AddMinutes(5);
@@ -518,6 +534,47 @@ public partial class VideoSubtitleWindow : Window
         return command;
     }
 
+    private static string ValidateAsrStartCommand(string? value)
+    {
+        var command = value?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(command))
+            throw new InvalidOperationException("ASR 启动命令为空。请点击“恢复默认”后重试。");
+        if (command.IndexOfAny(['\r', '\n', '&', '|', '>', '<', '^']) >= 0)
+            throw new InvalidOperationException("启动命令包含管道、重定向或多命令符号，已被安全拦截。请使用单个 ASR 启动命令。");
+
+        var executable = command;
+        var arguments = string.Empty;
+        if (command.StartsWith('"'))
+        {
+            var closingQuote = command.IndexOf('"', 1);
+            if (closingQuote < 0)
+                throw new InvalidOperationException("启动命令中的路径引号不完整。请修正或点击“恢复默认”。");
+            executable = command[1..closingQuote];
+            arguments = command[(closingQuote + 1)..].Trim();
+        }
+        else
+        {
+            var separator = command.IndexOf(' ');
+            if (separator > 0)
+            {
+                executable = command[..separator];
+                arguments = command[(separator + 1)..].Trim();
+            }
+        }
+
+        var name = Path.GetFileName(executable).ToLowerInvariant();
+        if (name is "funasr-server" or "funasr-server.exe") return command;
+        if (name is "python" or "python.exe" or "py" or "py.exe")
+        {
+            if (arguments.Contains("-c", StringComparison.OrdinalIgnoreCase) ||
+                !arguments.Contains("-m funasr", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Python 命令仅允许启动 FunASR 模块，不能执行任意脚本。请点击“恢复默认”使用推荐命令。");
+            return command;
+        }
+
+        throw new InvalidOperationException("仅允许 funasr-server 或 Python FunASR 启动命令。请点击“恢复默认”恢复可用配置。");
+    }
+
     private static async Task<string> FindSupportedPythonCommandAsync()
     {
         var candidates = new[]
@@ -567,19 +624,31 @@ public partial class VideoSubtitleWindow : Window
     private static string QuoteCommandPath(string path) =>
         path.Contains(' ') ? $"\"{path}\"" : path;
 
-    private static Process StartBackgroundCommand(string command, Action<string> onOutput)
+    private static Process StartBackgroundCommand(string command, Action<string> onOutput, string dataRoot)
     {
+        var cacheRoot = Path.Combine(dataRoot, "Cache");
+        var huggingFaceRoot = Path.Combine(cacheRoot, "huggingface");
+        var modelScopeRoot = Path.Combine(cacheRoot, "modelscope");
+        var torchRoot = Path.Combine(cacheRoot, "torch");
+        Directory.CreateDirectory(huggingFaceRoot);
+        Directory.CreateDirectory(modelScopeRoot);
+        Directory.CreateDirectory(torchRoot);
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/c {command}",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        startInfo.Environment["HF_HOME"] = huggingFaceRoot;
+        startInfo.Environment["MODELSCOPE_CACHE"] = modelScopeRoot;
+        startInfo.Environment["TORCH_HOME"] = torchRoot;
+        startInfo.Environment["XDG_CACHE_HOME"] = cacheRoot;
         var process = new Process
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                Arguments = $"/c {command}",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            },
+            StartInfo = startInfo,
             EnableRaisingEvents = true
         };
         process.OutputDataReceived += (_, args) =>

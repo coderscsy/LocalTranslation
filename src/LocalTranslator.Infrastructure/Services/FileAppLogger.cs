@@ -1,4 +1,5 @@
 using LocalTranslator.Core.Abstractions;
+using LocalTranslator.Infrastructure.Configuration;
 
 namespace LocalTranslator.Infrastructure.Services;
 
@@ -7,12 +8,9 @@ public sealed class FileAppLogger : IAppLogger
     private readonly object _syncRoot = new();
     private readonly string _logFilePath;
 
-    public FileAppLogger()
+    public FileAppLogger(AppOptions options)
     {
-        var logDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LocalTranslator",
-            "logs");
+        var logDirectory = Path.Combine(AppStoragePaths.ResolveDataRoot(options), "logs");
         Directory.CreateDirectory(logDirectory);
         _logFilePath = Path.Combine(logDirectory, $"app-{DateTime.Today:yyyyMMdd}.log");
     }
@@ -31,4 +29,3 @@ public sealed class FileAppLogger : IAppLogger
         }
     }
 }
-

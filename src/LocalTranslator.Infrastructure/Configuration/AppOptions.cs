@@ -2,11 +2,27 @@ namespace LocalTranslator.Infrastructure.Configuration;
 
 public sealed class AppOptions
 {
+    public string DataRoot { get; init; } = string.Empty;
+
     public string ModelsRoot { get; init; } = "Models";
 
     public TranslationOptions Translation { get; init; } = new();
 
     public OcrOptions Ocr { get; init; } = new();
+}
+
+public static class AppStoragePaths
+{
+    public static string ResolveDataRoot(AppOptions options)
+    {
+        var configured = Environment.ExpandEnvironmentVariables(options.DataRoot ?? string.Empty).Trim();
+        var path = string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LocalTranslator")
+            : configured;
+        var fullPath = Path.GetFullPath(path);
+        Directory.CreateDirectory(fullPath);
+        return fullPath;
+    }
 }
 
 public sealed class TranslationOptions

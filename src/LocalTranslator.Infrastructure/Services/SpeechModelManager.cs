@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Security.Cryptography;
 using LocalTranslator.Core.Exceptions;
+using LocalTranslator.Infrastructure.Configuration;
 
 namespace LocalTranslator.Infrastructure.Services;
 
@@ -14,11 +15,9 @@ public sealed class SpeechModelManager : IDisposable
 
     private readonly HttpClient _httpClient = new() { Timeout = Timeout.InfiniteTimeSpan };
 
-    public SpeechModelManager()
+    public SpeechModelManager(AppOptions options)
     {
-        ModelsRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LocalTranslator", "Models", "speech");
+        ModelsRoot = Path.Combine(AppStoragePaths.ResolveDataRoot(options), "Models", "speech");
         DefaultModelPath = Path.Combine(ModelsRoot, "whisper-small-q5_1", "ggml-small-q5_1.bin");
         LegacyModelPath = Path.Combine(ModelsRoot, "whisper-base-q5_1", "ggml-base-q5_1.bin");
     }

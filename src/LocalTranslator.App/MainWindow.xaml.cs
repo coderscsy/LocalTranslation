@@ -116,7 +116,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _videoSubtitleWindow = new VideoSubtitleWindow(_providerStore, _providerRouter, _logger) { Owner = this };
+        _videoSubtitleWindow = new VideoSubtitleWindow(_providerStore, _providerRouter, _logger, _options) { Owner = this };
         _videoSubtitleWindow.Closed += (_, _) => _videoSubtitleWindow = null;
         _videoSubtitleWindow.Show();
     }

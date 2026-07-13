@@ -65,6 +65,8 @@ dotnet run --project src/LocalTranslator.App/LocalTranslator.App.csproj
 
 视频字幕页默认选择 SenseVoice Small（推荐）。本机模式可在页面内一键安装 Python 3.10～3.12、PyTorch、TorchAudio、FunASR 与 API 服务依赖，并通过同一个按钮启动/停止 `http://127.0.0.1:8899/v1`。软件会在启动时检查依赖完整性，安装完成后不会重复提示；首次启动会下载约 936 MiB 的 SenseVoice 模型，并在状态卡显示实时进度。也可以填写局域网 FunASR/OpenAI-compatible ASR 地址。如果不想额外启动 ASR 服务，可切换到 Whisper GGML 引擎；软件提供 Whisper Small Q5_1 中文均衡模型（约 181 MiB），可一键下载安装、校验和卸载。已有自己的 Whisper GGML 模型时仍可直接选择外部文件。
 
+模型、ASR 缓存、日志和本地配置可通过本机 `appsettings.local.json` 的 `DataRoot` 指向其他磁盘，例如 `G:\LocalTranslationData`。ASR 启动命令允许高级用户修改，同时提供“恢复默认”按钮；空命令会自动恢复，管道、重定向、多命令和任意 Python 脚本会被拦截，避免误删配置或执行危险命令。
+
 电影模式会记录字幕时间轴；停止后可导出单语或双语 SRT。ASR 引擎负责语音转文字，原文识别后立即显示，连续短片段会先合并为更完整的字幕句段；翻译在独立队列中完成并以蹦字动画替换“正在翻译…”占位，避免慢速在线模型阻塞下一段语音识别。上下文管理器以线程安全方式只保存最近三句完整原文。最终翻译仍使用用户当前选择的翻译 Provider。
 
 架构见 [docs/architecture.md](docs/architecture.md)。
