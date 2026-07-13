@@ -2,7 +2,9 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Input;
 using LocalTranslator.Core.Abstractions;
@@ -16,6 +18,7 @@ public partial class VideoSubtitleWindow : Window
 {
     private const string PreferredVideoModel = "gemma-4-26b-a4b-it-mlx";
     private const int CurrentOverlayLayoutVersion = 4;
+    private const int CurrentAsrConfigurationVersion = 1;
     private const string DefaultAsrStartCommand = "funasr-server --host 127.0.0.1 --port 8899 --device cpu --model sensevoice";
     private readonly VideoSubtitleService _service;
     private readonly VideoTranslationSessionService _translationSession = new();
@@ -38,6 +41,10 @@ public partial class VideoSubtitleWindow : Window
     private CancellationTokenSource? _modelDownloadCancellation;
     private CancellationTokenSource? _asrServerStartCancellation;
     private Process? _managedAsrServerProcess;
+    private readonly StringBuilder _asrServerOutput = new();
+    private readonly object _asrServerOutputLock = new();
+    private bool _asrDependenciesInstalled;
+    private bool _checkingAsrDependencies;
 
     public VideoSubtitleWindow(
         SecureTranslationProviderStore providerStore,
@@ -66,6 +73,7 @@ public partial class VideoSubtitleWindow : Window
         SaveSettings();
         RefreshDefaultModelStatus();
         RefreshAsrEngineUi();
+        Loaded += async (_, _) => await RefreshAsrDependencyUiAsync();
         Closing += VideoSubtitleWindow_Closing;
         Closed += (_, _) =>
         {
@@ -134,6 +142,8 @@ public partial class VideoSubtitleWindow : Window
             InstallAsrDependenciesButton is null ||
             StartAsrServerButton is null ||
             AsrStatusText is null ||
+            AsrDependencyProgressPanel is null ||
+            AsrDependencyProgressText is null ||
             StartButton is null ||
             DefaultModelStatusText is null ||
             StatusText is null)
@@ -167,6 +177,10 @@ public partial class VideoSubtitleWindow : Window
         SenseVoiceUrlBox.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && !_running;
         SenseVoiceModelBox.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && !_running;
         TestAsrButton.IsEnabled = engine == SpeechRecognitionEngine.SenseVoiceSmall && EnableSenseVoiceCheck.IsChecked == true && !_running;
+        InstallAsrDependenciesButton.IsEnabled = !_asrDependenciesInstalled && !_checkingAsrDependencies;
+        InstallAsrDependenciesButton.Content = _checkingAsrDependencies
+            ? "正在检查…"
+            : _asrDependenciesInstalled ? "依赖已安装" : "安装依赖";
         if (!_running) StartButton.IsEnabled = anyAsrEnabled;
         DefaultModelStatusText.Text = engine == SpeechRecognitionEngine.SenseVoiceSmall
             ? "推荐默认"
@@ -215,38 +229,132 @@ public partial class VideoSubtitleWindow : Window
 
     private async void InstallAsrDependencies_Click(object sender, RoutedEventArgs e)
     {
-        if (MessageBox.Show(this,
-                "将使用 Python 3.11/3.12 安装 FunASR OpenAI-compatible 服务依赖。\n默认 Python 3.14 太新，部分依赖没有 wheel，会导致安装失败；软件会自动避开它。\n安装可能需要几分钟，并需要网络。是否继续？",
-                "安装 ASR 依赖",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question) != MessageBoxResult.Yes)
-            return;
+        try
+        {
+            if (await CheckAsrDependenciesAsync() is { IsComplete: true })
+            {
+                await RefreshAsrDependencyUiAsync(showStatus: true);
+                return;
+            }
+        }
+        catch
+        {
+            // The installation flow below reports missing Python or packages with a styled status message.
+        }
+
+        var confirmation = new StyledConfirmDialog(
+            "安装 ASR 依赖",
+            "软件将使用 Python 3.11/3.12 安装 FunASR、PyTorch 和本地 API 服务组件。首次安装需要下载较大的 PyTorch 包，耗时取决于网络速度；安装进度会直接显示在当前页面。",
+            "开始安装")
+        {
+            Owner = this
+        };
+        if (confirmation.ShowDialog() != true) return;
 
         InstallAsrDependenciesButton.IsEnabled = false;
-        SetAsrStatus("正在安装 ASR 依赖，请稍候…");
+        InstallAsrDependenciesButton.Content = "正在安装…";
+        AsrDependencyProgressPanel.Visibility = Visibility.Visible;
+        AsrDependencyProgressText.Text = "正在查找兼容的 Python 运行环境…";
+        SetAsrStatus("正在安装 ASR 依赖，窗口可以继续查看，但请不要关闭软件。");
         try
         {
             var python = await FindSupportedPythonCommandAsync();
-            var output = await RunCommandToExitAsync(
-                $"{python} -m pip install -U pip setuptools wheel funasr fastapi uvicorn python-multipart",
-                TimeSpan.FromMinutes(15));
+            var progress = new Progress<string>(line =>
+            {
+                var summary = FormatInstallationProgress(line);
+                if (!string.IsNullOrWhiteSpace(summary))
+                    AsrDependencyProgressText.Text = summary;
+            });
+            await RunCommandWithProgressAsync(
+                $"{python} -m pip install -U pip setuptools wheel && " +
+                $"{python} -m pip install torch torchaudio funasr fastapi uvicorn python-multipart",
+                TimeSpan.FromMinutes(30),
+                progress);
+
+            var check = await CheckAsrDependenciesAsync();
+            if (!check.IsComplete)
+                throw new InvalidOperationException($"安装命令已结束，但仍缺少组件：{string.Join("、", check.MissingComponents)}");
+
             if (string.IsNullOrWhiteSpace(AsrStartCommandBox.Text) ||
                 AsrStartCommandBox.Text.Contains("py -3.12 -m funasr.server", StringComparison.OrdinalIgnoreCase))
             {
                 AsrStartCommandBox.Text = DefaultAsrStartCommand;
                 SaveSettings();
             }
-            SetAsrStatus($"ASR 依赖安装完成。{TrimProcessOutput(output)}");
+            _asrDependenciesInstalled = true;
+            AsrDependencyProgressText.Text = "FunASR、PyTorch 与 API 服务组件均已就绪。";
+            SetAsrStatus("ASR 依赖安装完成，可以启动本地 ASR 服务。");
         }
         catch (Exception exception)
         {
             SetAsrStatus($"ASR 依赖安装失败：{exception.Message}");
+            AsrDependencyProgressText.Text = "安装未完成，请查看上方错误后重试。";
         }
         finally
         {
-            InstallAsrDependenciesButton.IsEnabled = true;
+            AsrDependencyProgressPanel.Visibility = Visibility.Collapsed;
+            await RefreshAsrDependencyUiAsync();
         }
     }
+
+    private async Task RefreshAsrDependencyUiAsync(bool showStatus = false)
+    {
+        if (_checkingAsrDependencies || InstallAsrDependenciesButton is null) return;
+        _checkingAsrDependencies = true;
+        InstallAsrDependenciesButton.IsEnabled = false;
+        InstallAsrDependenciesButton.Content = "正在检查…";
+        try
+        {
+            var check = await CheckAsrDependenciesAsync();
+            _asrDependenciesInstalled = check.IsComplete;
+            InstallAsrDependenciesButton.Content = check.IsComplete ? "依赖已安装" : "安装依赖";
+            InstallAsrDependenciesButton.IsEnabled = !check.IsComplete;
+            InstallAsrDependenciesButton.ToolTip = check.IsComplete
+                ? $"已使用 {check.PythonCommand}，FunASR 与 PyTorch 均可用。"
+                : check.MissingComponents.Count > 0
+                    ? $"缺少：{string.Join("、", check.MissingComponents)}"
+                    : "需要 Python 3.10～3.12。";
+            if (showStatus)
+                SetAsrStatus(check.IsComplete
+                    ? "ASR 依赖已安装，无需重复安装。"
+                    : $"ASR 依赖尚未完整安装：{string.Join("、", check.MissingComponents)}");
+        }
+        catch (Exception exception)
+        {
+            _asrDependenciesInstalled = false;
+            InstallAsrDependenciesButton.Content = "安装依赖";
+            InstallAsrDependenciesButton.IsEnabled = true;
+            InstallAsrDependenciesButton.ToolTip = exception.Message;
+            if (showStatus) SetAsrStatus($"ASR 依赖检查失败：{exception.Message}");
+        }
+        finally
+        {
+            _checkingAsrDependencies = false;
+        }
+    }
+
+    private static async Task<AsrDependencyCheckResult> CheckAsrDependenciesAsync()
+    {
+        var python = await FindSupportedPythonCommandAsync();
+        var missing = (await RunCommandToExitAsync(
+            $"{python} -c \"import importlib.util as u; names=('funasr','fastapi','uvicorn','multipart','torch','torchaudio'); print(','.join(n for n in names if u.find_spec(n) is None))\"",
+            TimeSpan.FromSeconds(20))).Trim();
+        var components = missing.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(GetDependencyDisplayName)
+            .ToList();
+        var server = await FindFunAsrServerCommandAsync(python);
+        if (server.Equals("funasr-server", StringComparison.OrdinalIgnoreCase))
+            components.Add("funasr-server");
+        return new AsrDependencyCheckResult(python, components);
+    }
+
+    private static string GetDependencyDisplayName(string component) => component switch
+    {
+        "torch" => "PyTorch",
+        "torchaudio" => "TorchAudio",
+        "multipart" => "python-multipart",
+        _ => component
+    };
 
     private async void ToggleAsrServer_Click(object sender, RoutedEventArgs e)
     {
@@ -273,22 +381,34 @@ public partial class VideoSubtitleWindow : Window
             if (await TryTestAsrEndpointAsync(token))
             {
                 SetAsrStatus("ASR 服务已经可用。");
+                StartAsrServerButton.Content = "ASR 服务已运行";
                 return;
+            }
+
+            var dependencyCheck = await CheckAsrDependenciesAsync();
+            _asrDependenciesInstalled = dependencyCheck.IsComplete;
+            if (!dependencyCheck.IsComplete)
+            {
+                await RefreshAsrDependencyUiAsync();
+                throw new InvalidOperationException(
+                    $"ASR 依赖不完整，请先安装：{string.Join("、", dependencyCheck.MissingComponents)}。");
             }
 
             var command = await NormalizeAsrStartCommandAsync(AsrStartCommandBox.Text.Trim());
             if (string.IsNullOrWhiteSpace(command))
                 throw new InvalidOperationException("ASR 服务启动命令不能为空。");
 
-            _managedAsrServerProcess = StartBackgroundCommand(command);
-            SetAsrStatus("ASR 服务正在启动，首次加载模型可能需要 20～90 秒…");
+            lock (_asrServerOutputLock) _asrServerOutput.Clear();
+            _managedAsrServerProcess = StartBackgroundCommand(command, CaptureAsrServerOutput);
+            SetAsrStatus("ASR 服务正在启动；首次运行会下载约 936 MiB 的 SenseVoice 模型，请查看这里的实时进度…");
 
-            var deadline = DateTimeOffset.Now.AddSeconds(90);
+            var deadline = DateTimeOffset.Now.AddMinutes(5);
             while (DateTimeOffset.Now < deadline)
             {
                 token.ThrowIfCancellationRequested();
                 if (_managedAsrServerProcess.HasExited)
-                    throw new InvalidOperationException($"ASR 服务进程已退出，退出码：{_managedAsrServerProcess.ExitCode}。请检查启动命令或先安装依赖。");
+                    throw new InvalidOperationException(
+                        $"ASR 服务进程已退出（代码 {_managedAsrServerProcess.ExitCode}）：{GetAsrServerOutputTail()}");
 
                 await Task.Delay(2000, token);
                 if (await TryTestAsrEndpointAsync(token))
@@ -297,9 +417,13 @@ public partial class VideoSubtitleWindow : Window
                     StartAsrServerButton.Content = "停止 ASR 服务";
                     return;
                 }
+
+                var latestOutput = GetAsrServerOutputTail(260, latestLineOnly: true);
+                if (!string.IsNullOrWhiteSpace(latestOutput))
+                    SetAsrStatus($"ASR 服务正在启动：{latestOutput}");
             }
 
-            throw new TimeoutException("ASR 服务启动超时。模型首次下载/加载可能较慢，请稍后再次点击测试，或检查命令窗口输出。");
+            throw new TimeoutException($"ASR 服务在 5 分钟内未就绪：{GetAsrServerOutputTail()}");
         }
         catch (OperationCanceledException)
         {
@@ -443,7 +567,7 @@ public partial class VideoSubtitleWindow : Window
     private static string QuoteCommandPath(string path) =>
         path.Contains(' ') ? $"\"{path}\"" : path;
 
-    private static Process StartBackgroundCommand(string command)
+    private static Process StartBackgroundCommand(string command, Action<string> onOutput)
     {
         var process = new Process
         {
@@ -458,11 +582,47 @@ public partial class VideoSubtitleWindow : Window
             },
             EnableRaisingEvents = true
         };
+        process.OutputDataReceived += (_, args) =>
+        {
+            if (!string.IsNullOrWhiteSpace(args.Data)) onOutput(args.Data);
+        };
+        process.ErrorDataReceived += (_, args) =>
+        {
+            if (!string.IsNullOrWhiteSpace(args.Data)) onOutput(args.Data);
+        };
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
         return process;
     }
+
+    private void CaptureAsrServerOutput(string line)
+    {
+        lock (_asrServerOutputLock)
+        {
+            _asrServerOutput.AppendLine(line);
+            if (_asrServerOutput.Length > 12_000)
+                _asrServerOutput.Remove(0, _asrServerOutput.Length - 8_000);
+        }
+    }
+
+    private string GetAsrServerOutputTail(int maxLength = 1_200, bool latestLineOnly = false)
+    {
+        lock (_asrServerOutputLock)
+        {
+            var lines = SanitizeConsoleText(_asrServerOutput.ToString())
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var value = latestLineOnly
+                ? lines.LastOrDefault() ?? string.Empty
+                : string.Join(' ', lines).Trim();
+            if (value.Length <= maxLength) return value;
+            if (latestLineOnly) return $"{value[..maxLength]}…";
+            return value[^maxLength..];
+        }
+    }
+
+    private static string SanitizeConsoleText(string value) =>
+        Regex.Replace(value, "\\x1B\\[[0-?]*[ -/]*[@-~]", string.Empty);
 
     private static async Task<string> RunCommandToExitAsync(string command, TimeSpan timeout)
     {
@@ -489,10 +649,86 @@ public partial class VideoSubtitleWindow : Window
         return output.Length > 0 ? output : error;
     }
 
+    private static async Task<string> RunCommandWithProgressAsync(
+        string command,
+        TimeSpan timeout,
+        IProgress<string> progress)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c {command}",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            },
+            EnableRaisingEvents = true
+        };
+        var output = new StringBuilder();
+        var sync = new object();
+        var outputClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var errorClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void HandleLine(string? line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return;
+            lock (sync) output.AppendLine(line);
+            progress.Report(line);
+        }
+
+        process.OutputDataReceived += (_, args) =>
+        {
+            if (args.Data is null) outputClosed.TrySetResult();
+            else HandleLine(args.Data);
+        };
+        process.ErrorDataReceived += (_, args) =>
+        {
+            if (args.Data is null) errorClosed.TrySetResult();
+            else HandleLine(args.Data);
+        };
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(timeout);
+        }
+        catch (TimeoutException)
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            throw new TimeoutException($"安装超过 {timeout.TotalMinutes:F0} 分钟仍未完成，已停止安装进程。请检查网络后重试。");
+        }
+        await Task.WhenAll(outputClosed.Task, errorClosed.Task).WaitAsync(TimeSpan.FromSeconds(5));
+        string result;
+        lock (sync) result = output.ToString();
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException(TrimProcessOutput(result));
+        return result;
+    }
+
+    private static string FormatInstallationProgress(string line)
+    {
+        var value = line.Trim();
+        if (value.Length == 0) return string.Empty;
+        if (value.StartsWith("Collecting ", StringComparison.OrdinalIgnoreCase))
+            return $"正在准备 {value["Collecting ".Length..]}";
+        if (value.StartsWith("Downloading ", StringComparison.OrdinalIgnoreCase))
+            return $"正在下载 {value["Downloading ".Length..]}";
+        if (value.StartsWith("Installing collected packages", StringComparison.OrdinalIgnoreCase))
+            return "正在写入并配置依赖组件…";
+        if (value.StartsWith("Successfully installed", StringComparison.OrdinalIgnoreCase))
+            return "依赖组件安装成功，正在执行完整性检查…";
+        if (value.StartsWith("Requirement already satisfied", StringComparison.OrdinalIgnoreCase))
+            return "正在检查已有依赖…";
+        return value.Length <= 180 ? value : $"{value[..180]}…";
+    }
+
     private static string TrimProcessOutput(string text)
     {
         var value = string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)).Trim();
-        return value.Length <= 160 ? value : $"{value[..160]}…";
+        return value.Length <= 1_200 ? value : $"…{value[^1_200..]}";
     }
 
     private async void InstallDefaultModel_Click(object sender, RoutedEventArgs e)
@@ -961,9 +1197,11 @@ public partial class VideoSubtitleWindow : Window
             var migrateCompactOverlay = settings.OverlayLayoutVersion < CurrentOverlayLayoutVersion;
             ModelPathBox.Text = settings.WhisperModelPath ?? string.Empty;
             SenseVoiceUrlBox.Text = NormalizeSenseVoiceBaseUrl(settings.SenseVoiceBaseUrl);
-            SenseVoiceModelBox.Text = string.IsNullOrWhiteSpace(settings.SenseVoiceModel)
+            SenseVoiceModelBox.Text = settings.AsrConfigurationVersion < CurrentAsrConfigurationVersion
                 ? "sensevoice"
-                : settings.SenseVoiceModel;
+                : string.IsNullOrWhiteSpace(settings.SenseVoiceModel)
+                    ? "sensevoice"
+                    : settings.SenseVoiceModel;
             AsrStartCommandBox.Text = string.IsNullOrWhiteSpace(settings.AsrStartCommand)
                 ? DefaultAsrStartCommand
                 : NormalizeSavedAsrStartCommand(settings.AsrStartCommand);
@@ -1036,7 +1274,8 @@ public partial class VideoSubtitleWindow : Window
             VideoModel = GetSelectedVideoModel(),
             TranslationConcurrency = VideoConcurrencyCombo.SelectedItem is int concurrency ? concurrency : 3,
             VideoSceneId = (VideoSceneCombo.SelectedItem as VideoSceneChoice)?.Id ?? "general",
-            OverlayLayoutVersion = CurrentOverlayLayoutVersion
+            OverlayLayoutVersion = CurrentOverlayLayoutVersion,
+            AsrConfigurationVersion = CurrentAsrConfigurationVersion
         }));
     }
 
@@ -1078,6 +1317,7 @@ public partial class VideoSubtitleWindow : Window
         public int TranslationConcurrency { get; init; } = 3;
         public string VideoSceneId { get; init; } = "general";
         public int OverlayLayoutVersion { get; init; }
+        public int AsrConfigurationVersion { get; init; }
     }
 
     private sealed class VideoTranslationSessionService : ITranslationService, IDisposable
@@ -1112,6 +1352,13 @@ public sealed record VideoProviderChoice(string Id, string DisplayName)
 public sealed record AsrEngineChoice(SpeechRecognitionEngine Engine, string DisplayName)
 {
     public override string ToString() => DisplayName;
+}
+
+internal sealed record AsrDependencyCheckResult(
+    string PythonCommand,
+    IReadOnlyList<string> MissingComponents)
+{
+    public bool IsComplete => MissingComponents.Count == 0;
 }
 
 public sealed record VideoSceneChoice(string Id, string DisplayName)

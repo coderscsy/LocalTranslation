@@ -63,7 +63,7 @@ dotnet run --project src/LocalTranslator.App/LocalTranslator.App.csproj
 
 当前版本通过 WASAPI Loopback 按声卡真实混音格式采集默认输出设备的全部系统声音，再明确混合为单声道并重采样为 16 kHz PCM。识别使用低延时静音触发切片、约 160ms 音频重叠和语义缓冲，因此是“分段近实时”，并非零延迟。音频队列有上限，处理跟不上时会优先保持当前字幕而不无限积压；静音片段和低置信度幻觉会被过滤。当前 Windows 采集链不承诺只锁定某一个播放器进程。
 
-视频字幕页默认选择 SenseVoice Small（推荐）。该模式要求用户在本机或局域网启动 FunASR/OpenAI-compatible ASR 服务，并在界面填写 Base URL，例如 `http://127.0.0.1:10095/v1`。如果不想额外启动 ASR 服务，可切换到 Whisper GGML 引擎；软件提供 Whisper Small Q5_1 中文均衡模型（约 181 MiB），可一键下载安装、校验和卸载。已有自己的 Whisper GGML 模型时仍可直接选择外部文件。
+视频字幕页默认选择 SenseVoice Small（推荐）。本机模式可在页面内一键安装 Python 3.10～3.12、PyTorch、TorchAudio、FunASR 与 API 服务依赖，并通过同一个按钮启动/停止 `http://127.0.0.1:8899/v1`。软件会在启动时检查依赖完整性，安装完成后不会重复提示；首次启动会下载约 936 MiB 的 SenseVoice 模型，并在状态卡显示实时进度。也可以填写局域网 FunASR/OpenAI-compatible ASR 地址。如果不想额外启动 ASR 服务，可切换到 Whisper GGML 引擎；软件提供 Whisper Small Q5_1 中文均衡模型（约 181 MiB），可一键下载安装、校验和卸载。已有自己的 Whisper GGML 模型时仍可直接选择外部文件。
 
 电影模式会记录字幕时间轴；停止后可导出单语或双语 SRT。ASR 引擎负责语音转文字，原文识别后立即显示，连续短片段会先合并为更完整的字幕句段；翻译在独立队列中完成并以蹦字动画替换“正在翻译…”占位，避免慢速在线模型阻塞下一段语音识别。上下文管理器以线程安全方式只保存最近三句完整原文。最终翻译仍使用用户当前选择的翻译 Provider。
 

@@ -90,15 +90,39 @@
                                     Padding="12,0" Style="{StaticResource PrimaryButtonStyle}"
                                     Content="启动 ASR 服务" Click="ToggleAsrServer_Click"/>
                         </Grid>
-                        <Border Grid.Row="3" Grid.ColumnSpan="3" Margin="0,12,0,0"
-                                Padding="12,9" Background="#F8F9FC"
+                        <Border x:Name="AsrStatusBorder"
+                                Grid.Row="3" Grid.ColumnSpan="3" Margin="0,12,0,0"
+                                Padding="14,12" Background="#F7F8FC"
                                 BorderBrush="{StaticResource BorderBrush}"
-                                BorderThickness="1" CornerRadius="9">
-                            <TextBlock x:Name="AsrStatusText"
-                                       FontSize="11"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       TextWrapping="Wrap"
-                                       Text="ASR 状态会在这里显示，测试结果无需滚动到底部查看。"/>
+                                BorderThickness="1" CornerRadius="10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="30"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Width="24" Height="24" VerticalAlignment="Top"
+                                        Background="#E9EAFE" CornerRadius="12">
+                                    <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               FontSize="12" FontWeight="Bold"
+                                               Foreground="{StaticResource AccentBrush}" Text="i"/>
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                    <TextBlock x:Name="AsrStatusText"
+                                               FontSize="11.5"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               TextWrapping="Wrap"
+                                               Text="ASR 状态会在这里显示，测试结果无需滚动到底部查看。"/>
+                                    <StackPanel x:Name="AsrDependencyProgressPanel"
+                                                Margin="0,9,0,0" Visibility="Collapsed">
+                                        <ProgressBar x:Name="AsrDependencyProgress"
+                                                     Height="5" IsIndeterminate="True"/>
+                                        <TextBlock x:Name="AsrDependencyProgressText"
+                                                   Margin="0,6,0,0" FontSize="10.5"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
                         </Border>
                     </Grid>
 
