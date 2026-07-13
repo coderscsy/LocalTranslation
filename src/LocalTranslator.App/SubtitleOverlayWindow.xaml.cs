@@ -8,6 +8,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using LocalTranslator.Core.Models;
 
 namespace LocalTranslator.App;
@@ -40,6 +41,8 @@ public partial class SubtitleOverlayWindow : Window
     private double _sourceFontSize;
     private double _translationFontSize;
     private double _maxTextWidth = 820;
+    private bool _isFullyTransparent;
+    private readonly Effect? _subtitlePanelEffect;
     private SupportedLanguage _targetLanguage = SupportedLanguage.ChineseSimplified;
     private string _targetLanguageLabel = SupportedLanguage.ChineseSimplified.ToDisplayName();
     private readonly ObservableCollection<OverlaySubtitleLine> _subtitleLines = [];
@@ -57,6 +60,7 @@ public partial class SubtitleOverlayWindow : Window
         SupportedLanguage targetLanguage)
     {
         InitializeComponent();
+        _subtitlePanelEffect = SubtitlePanel.Effect;
         Height = Math.Clamp(overlayHeight, MinHeight, MaxHeight);
         _expanded = Height > 240;
         _interactionEnabled = interactionEnabled;
@@ -99,10 +103,41 @@ public partial class SubtitleOverlayWindow : Window
     public void ApplyBackgroundOpacity(double opacity)
     {
         var value = Math.Clamp(opacity, 0, 0.92);
+        _isFullyTransparent = value <= 0.001;
         SubtitlePanelTopStop.Color = Color.FromArgb(
             (byte)Math.Round(value * 255), 0, 0, 0);
         SubtitlePanelBottomStop.Color = Color.FromArgb(
             (byte)Math.Round(Math.Max(0, value - 0.12) * 255), 0, 0, 0);
+
+        // A transparent subtitle window is still an interactive subtitle window.
+        // Mouse pass-through remains a separate explicit mode (Ctrl+Shift+F8).
+        if (_isFullyTransparent && !_interactionEnabled)
+        {
+            _interactionEnabled = true;
+            ApplyClickThrough();
+            InteractionModeChanged?.Invoke(this, true);
+        }
+
+        ApplyTransparentChromeMode();
+    }
+
+    private void ApplyTransparentChromeMode()
+    {
+        var chromeVisibility = _isFullyTransparent ? Visibility.Collapsed : Visibility.Visible;
+        // A one-alpha hit-test layer is visually indistinguishable from full transparency,
+        // but prevents the layered HWND from discarding mouse input on empty pixels.
+        InteractionSurface.Background = _isFullyTransparent
+            ? new SolidColorBrush(Color.FromArgb(1, 0, 0, 0))
+            : Brushes.Transparent;
+        ToolbarPanel.Visibility = chromeVisibility;
+        ToolbarDivider.Visibility = chromeVisibility;
+        InteractionHint.Visibility = chromeVisibility;
+        ResizeThumb.Visibility = chromeVisibility;
+        SubtitlePanel.Effect = _isFullyTransparent ? null : _subtitlePanelEffect;
+        SubtitleScrollViewer.VerticalScrollBarVisibility = _isFullyTransparent
+            ? ScrollBarVisibility.Hidden
+            : ScrollBarVisibility.Auto;
+        RefreshResizeInteraction();
     }
 
     public void ApplyLayout(
@@ -613,7 +648,7 @@ public partial class SubtitleOverlayWindow : Window
 
     private void Window_MouseEnter(object sender, MouseEventArgs e)
     {
-        if (!_interactionEnabled) return;
+        if (!_interactionEnabled || _isFullyTransparent) return;
         InteractionHint.Opacity = 1;
         ResizeThumb.Opacity = 0.9;
     }
@@ -640,16 +675,24 @@ public partial class SubtitleOverlayWindow : Window
             SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
 
         SubtitlePanel.Cursor = _interactionEnabled ? Cursors.SizeAll : Cursors.Arrow;
-        TopResizeThumb.IsHitTestVisible = _interactionEnabled;
-        BottomResizeThumb.IsHitTestVisible = _interactionEnabled;
-        LeftResizeThumb.IsHitTestVisible = _interactionEnabled;
-        RightResizeThumb.IsHitTestVisible = _interactionEnabled;
-        ResizeThumb.IsHitTestVisible = _interactionEnabled;
+        RefreshResizeInteraction();
         if (!_interactionEnabled)
         {
             InteractionHint.Opacity = 0;
             ResizeThumb.Opacity = 0;
         }
+    }
+
+    private void RefreshResizeInteraction()
+    {
+        // In pure-text mode every point in the subtitle area should drag the window.
+        // Invisible resize thumbs otherwise steal mouse-down events along the edges.
+        var canResize = _interactionEnabled && !_isFullyTransparent;
+        TopResizeThumb.IsHitTestVisible = canResize;
+        BottomResizeThumb.IsHitTestVisible = canResize;
+        LeftResizeThumb.IsHitTestVisible = canResize;
+        RightResizeThumb.IsHitTestVisible = canResize;
+        ResizeThumb.IsHitTestVisible = canResize;
     }
 
     private void RaisePlacementChanged() => PlacementChanged?.Invoke(this,

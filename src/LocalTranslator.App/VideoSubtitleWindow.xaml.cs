@@ -1064,6 +1064,8 @@ public partial class VideoSubtitleWindow : Window
             ExportButton.IsEnabled = false;
             if (OverlayCheck.IsChecked == true)
             {
+                if (OverlayOpacitySlider.Value <= 0.001 && OverlayInteractionCheck.IsChecked != true)
+                    OverlayInteractionCheck.IsChecked = true;
                 _overlay = new SubtitleOverlayWindow(SourceFontSlider.Value, TranslationFontSlider.Value,
                     BottomOffsetSlider.Value, OverlayWidthSlider.Value, _overlayHeight,
                     _overlayLeft, _overlayTop, OverlayInteractionCheck.IsChecked == true,
@@ -1196,6 +1198,8 @@ public partial class VideoSubtitleWindow : Window
             BottomOffsetSlider.Value, OverlayWidthSlider.Value,
             ReferenceEquals(sender, BottomOffsetSlider));
         _overlayOpacity = OverlayOpacitySlider.Value;
+        if (_overlayOpacity <= 0.001 && OverlayInteractionCheck.IsChecked != true)
+            OverlayInteractionCheck.IsChecked = true;
         _overlay?.ApplyBackgroundOpacity(_overlayOpacity);
         if (ReferenceEquals(sender, BottomOffsetSlider))
         {
